@@ -1049,9 +1049,7 @@ int sdhci_msm_execute_tuning(struct sdhci_host *host, u32 opcode)
 	u8 drv_type = 0;
 	bool drv_type_changed = false;
 	struct mmc_card *card = host->mmc->card;
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	int sts_retry;
-#endif
 
 	/*
 	 * Tuning is required for SDR104, HS200 and HS400 cards and
@@ -1109,9 +1107,7 @@ retry:
 			.data = &data
 		};
 		struct scatterlist sg;
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 		struct mmc_command sts_cmd = {0};
-#endif
 
 		/* set the phase in delay line hw block */
 		rc = msm_config_cm_dll_phase(host, phase);
@@ -1132,7 +1128,6 @@ retry:
 		memset(data_buf, 0, size);
 		mmc_wait_for_req(mmc, &mrq);
 
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 		if (card && (cmd.error || data.error)) {
 			sts_cmd.opcode = MMC_SEND_STATUS;
 			sts_cmd.arg = card->rca << 16;
@@ -1161,16 +1156,7 @@ retry:
 				break;
 			};
 		}
-#else
-		/*
-		 * wait for 146 MCLK cycles for the card to send out the data
-		 * and thus move to TRANS state. As the MCLK would be minimum
-		 * 200MHz when tuning is performed, we need maximum 0.73us
-		 * delay. To be on safer side 1ms delay is given.
-		 */
-		if (cmd.error)
-			usleep_range(1000, 1200);
-#endif
+
 		if (!cmd.error && !data.error &&
 			!memcmp(data_buf, tuning_block_pattern, size)) {
 			/* tuning is successful at this tuning point */
