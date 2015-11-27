@@ -20,6 +20,7 @@
 
 #include "power.h"
 
+
 static bool enable_bluedroid_timer_ws = true;
 module_param(enable_bluedroid_timer_ws, bool, 0644);
 
@@ -30,6 +31,13 @@ static bool enable_wlan_wow_wl_ws = true;
 module_param(enable_wlan_wow_wl_ws, bool, 0644);
 static bool enable_wlan_ipa_ws = true;
 module_param(enable_wlan_ipa_ws, bool, 0644);
+
+static bool enable_wlan_rx_wake_ws = true;
+module_param(enable_wlan_rx_wake_ws, bool, 0644);
+static bool enable_wlan_ctrl_wake_ws = true;
+module_param(enable_wlan_ctrl_wake_ws, bool, 0644);
+static bool enable_wlan_wake_ws = true;
+module_param(enable_wlan_wake_ws, bool, 0644);
 
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
@@ -449,6 +457,15 @@ static void wakeup_source_activate(struct wakeup_source *ws)
                 return;
 
 	if (!enable_wlan_ipa_ws && !strcmp(ws->name, "wlan_ipa"))
+                return;
+
+	if (!enable_wlan_rx_wake_ws && !strcmp(ws->name, "wlan_rx_wake"))
+                return;
+
+	if (!enable_wlan_ctrl_wake_ws && !strcmp(ws->name, "wlan_ctrl_wake"))
+                return;
+
+	if (!enable_wlan_wake_ws && !strcmp(ws->name, "wlan_wake"))
                 return;
 
 	if (WARN(wakeup_source_not_registered(ws),
