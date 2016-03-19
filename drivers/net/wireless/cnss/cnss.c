@@ -1,5 +1,4 @@
 /* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
- * Copyright (C) 2016 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -855,6 +854,7 @@ int cnss_get_fw_files_for_target(struct cnss_fw_files *pfw_files,
 	if (!pfw_files)
 		return -ENODEV;
 
+	/* Modified by Xiaomi for Leo and Libra, 2016 */
 	if (get_hw_version_devid() == 3) {
 		strcpy(FW_FILES_QCA6174_FW_3_0.board_data, "bd30_a10.bin");
 	}
