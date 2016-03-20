@@ -33,6 +33,13 @@ module_param(vow_config, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(vow_config, "Do VoW Configuration");
 EXPORT_SYMBOL(vow_config);
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+static char *mac;
+module_param(mac, charp, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(mac, "QCA 6164 mac address");
+EXPORT_SYMBOL(mac);
+#endif
+
 /* FIX THIS -
  * For now, all these configuration parameters are hardcoded.
  * Many of these should actually be determined dynamically instead.
