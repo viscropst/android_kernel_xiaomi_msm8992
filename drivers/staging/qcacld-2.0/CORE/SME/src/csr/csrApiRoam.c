@@ -72,8 +72,10 @@
 
 #define CSR_NUM_IBSS_START_CHANNELS_50      4
 #define CSR_NUM_IBSS_START_CHANNELS_24      3
-#define CSR_WAIT_FOR_KEY_TIMEOUT_PERIOD         ( 5 * VOS_TIMER_TO_SEC_UNIT )  // 5 seconds, for WPA, WPA2, CCKM
-#define CSR_WAIT_FOR_WPS_KEY_TIMEOUT_PERIOD         ( 120 * VOS_TIMER_TO_SEC_UNIT )  // 120 seconds, for WPS
+/* 15 seconds, for WPA, WPA2, CCKM */
+#define CSR_WAIT_FOR_KEY_TIMEOUT_PERIOD         (15 * VOS_TIMER_TO_SEC_UNIT)
+/* 120 seconds, for WPS */
+#define CSR_WAIT_FOR_WPS_KEY_TIMEOUT_PERIOD     (120 * VOS_TIMER_TO_SEC_UNIT)
 /*---------------------------------------------------------------------------
   OBIWAN recommends [8 10]% : pick 9%
 ---------------------------------------------------------------------------*/
@@ -5755,6 +5757,28 @@ static tANI_BOOLEAN csrRoamProcessResults( tpAniSirGlobal pMac, tSmeCmd *pComman
                 csrRoamSaveSecurityRspIE(pMac, sessionId, pProfile->negotiatedAuthType, pSirBssDesc, pIes);
 #ifdef FEATURE_WLAN_ESE
                 roamInfo.isESEAssoc = pSession->connectedProfile.isESEAssoc;
+#endif
+#ifdef WLAN_FEATURE_VOWIFI_11R
+                if (pSirBssDesc->mdiePresent)
+                {
+                    if(csrIsAuthType11r(pProfile->negotiatedAuthType, VOS_TRUE)
+#ifdef FEATURE_WLAN_ESE
+                       && !((pProfile->negotiatedAuthType ==
+                                 eCSR_AUTH_TYPE_OPEN_SYSTEM) &&
+                                 (pIes->ESEVersion.present) &&
+                                 (pMac->roam.configParam.isEseIniFeatureEnabled))
+#endif
+                       )
+                    {
+                        // is11Rconnection
+                        roamInfo.is11rAssoc = VOS_TRUE;
+                    }
+                    else
+                    {
+                        // is11Rconnection
+                        roamInfo.is11rAssoc = VOS_FALSE;
+                    }
+                }
 #endif
 
                 // csrRoamStateChange also affects sub-state. Hence, csrRoamStateChange happens first and then
@@ -18454,6 +18478,9 @@ void csrRoamFTPreAuthRspProcessor( tHalHandle hHal, tpSirFTPreAuthRsp pFTPreAuth
       pMac->roam.roamSession[sessionId].connectedProfile.AuthType;
 
    pSession->ftSmeContext.addMDIE = FALSE;
+   // Done with it, init it.
+   pSession->ftSmeContext.psavedFTPreAuthRsp = NULL;
+
    if (csrRoamIs11rAssoc(pMac, pFTPreAuthRsp->smeSessionId) &&
       (conn_Auth_type == eCSR_AUTH_TYPE_OPEN_SYSTEM))
    {
@@ -18484,9 +18511,6 @@ void csrRoamFTPreAuthRspProcessor( tHalHandle hHal, tpSirFTPreAuthRsp pFTPreAuth
          pSession->ftSmeContext.addMDIE = TRUE;
       }
    }
-
-   // Done with it, init it.
-   pSession->ftSmeContext.psavedFTPreAuthRsp = NULL;
 }
 #endif
 

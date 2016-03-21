@@ -677,8 +677,8 @@ int wmi_unified_cmd_send(wmi_unified_t wmi_handle, wmi_buf_t buf, int len,
 	if (adf_os_atomic_read(&wmi_handle->is_target_suspended) &&
 			( (WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID != cmd_id) &&
 			  (WMI_PDEV_RESUME_CMDID != cmd_id)) ) {
-		pr_err("%s: Target is suspended  could not send WMI command\n",
-				__func__);
+		pr_err("%s: Target is suspended  could not send WMI command: %d\n",
+				__func__, cmd_id);
 		VOS_ASSERT(0);
 		return -EBUSY;
 	} else
@@ -1195,6 +1195,18 @@ int wmi_get_pending_cmds(wmi_unified_t wmi_handle)
 void wmi_set_target_suspend(wmi_unified_t wmi_handle, A_BOOL val)
 {
 	adf_os_atomic_set(&wmi_handle->is_target_suspended, val);
+}
+
+/**
+ * wmi_set_tgt_assert() - set target assert configuration
+ * @wmi_handle: Pointer to WMI handle
+ * @val: Target assert config value
+ *
+ * Return: none
+ */
+void wmi_set_tgt_assert(wmi_unified_t wmi_handle, bool val)
+{
+	wmi_handle->tgt_force_assert_enable = val;
 }
 
 #ifdef FEATURE_RUNTIME_PM

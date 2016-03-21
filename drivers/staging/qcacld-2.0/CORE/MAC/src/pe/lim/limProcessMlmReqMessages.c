@@ -2793,6 +2793,9 @@ limProcessMlmDisassocReqNtf(tpAniSirGlobal pMac, eHalStatus suspendStatus, tANI_
     tLimMlmDisassocCnf       mlmDisassocCnf;
     tpPESession              psessionEntry;
     extern tANI_BOOLEAN     sendDisassocFrame;
+    tSirSmeDisassocRsp      *pSirSmeDisassocRsp;
+    tANI_U32                *pMsg;
+    tANI_U8                 *pBuf;
 
     if(eHAL_STATUS_SUCCESS != suspendStatus)
     {
@@ -2830,12 +2833,35 @@ limProcessMlmDisassocReqNtf(tpAniSirGlobal pMac, eHalStatus suspendStatus, tANI_
                    FL("received MLM_DISASSOC_REQ with invalid BSS id "));)
                 limPrintMacAddr(pMac, pMlmDisassocReq->peerMacAddr, LOGW);
 
-                /// Prepare and Send LIM_MLM_DISASSOC_CNF
+                /*
+                 * Disassociation response due to host triggered disassociation
+                 */
+                pSirSmeDisassocRsp =
+                    vos_mem_malloc(sizeof(tSirSmeDisassocRsp));
+                if (NULL == pSirSmeDisassocRsp) {
+                    /* Log error */
+                    limLog(pMac, LOGP,
+                        FL("call to AllocateMemory failed for eWNI_SME_DISASSOC_RSP"));
+                    return;
+                }
+                limLog(pMac, LOG1,
+                    FL("send eWNI_SME_DISASSOC_RSP with retCode: %d for " MAC_ADDRESS_STR),
+                        eSIR_SME_DEAUTH_STATUS,
+                        MAC_ADDR_ARRAY(pMlmDisassocReq->peerMacAddr));
+                    pSirSmeDisassocRsp->messageType = eWNI_SME_DISASSOC_RSP;
+                    pSirSmeDisassocRsp->length = sizeof(tSirSmeDisassocRsp);
+                    pSirSmeDisassocRsp->sessionId = pMlmDisassocReq->sessionId;
+                    pSirSmeDisassocRsp->transactionId = 0;
+                    pSirSmeDisassocRsp->statusCode = eSIR_SME_DEAUTH_STATUS;
 
-                mlmDisassocCnf.resultCode      =
-                                       eSIR_SME_INVALID_PARAMETERS;
+                    pBuf = (tANI_U8 *) pSirSmeDisassocRsp->peerMacAddr;
+                    vos_mem_copy( pBuf, pMlmDisassocReq->peerMacAddr,
+                        sizeof(tSirMacAddr));
+                    pMsg = (tANI_U32*) pSirSmeDisassocRsp;
 
-                goto end;
+                    limSendSmeDisassocDeauthNtf(pMac, eHAL_STATUS_SUCCESS,
+                                                 (tANI_U32*) pMsg);
+                    return;
             }
 
             break;
@@ -2896,33 +2922,19 @@ limProcessMlmDisassocReqNtf(tpAniSirGlobal pMac, eHalStatus suspendStatus, tANI_
          */
         pStaDs->mlmStaContext.mlmState   = eLIM_MLM_WT_DEL_STA_RSP_STATE;
 
-        /* If the reason for disassociation is inactivity of STA, then
-           dont wait for acknowledgement */
-        if ((pMlmDisassocReq->reasonCode == eSIR_MAC_DISASSOC_DUE_TO_INACTIVITY_REASON) &&
-            (psessionEntry->limSystemRole == eLIM_AP_ROLE))
-        {
-
-             limSendDisassocMgmtFrame(pMac,
+        limSendDisassocMgmtFrame(pMac,
                                  pMlmDisassocReq->reasonCode,
                                  pMlmDisassocReq->peerMacAddr,
                                  psessionEntry, FALSE);
 
-             /* Send Disassoc CNF and receive path cleanup */
-             limSendDisassocCnf(pMac);
-        }
-        else
-        {
-             limSendDisassocMgmtFrame(pMac,
-                                 pMlmDisassocReq->reasonCode,
-                                 pMlmDisassocReq->peerMacAddr,
-                                 psessionEntry, TRUE);
-             /*
-              * Abort Tx so that data frames won't be sent to the AP
-              * after sending Disassoc.
-              */
-             if (eLIM_STA_ROLE == psessionEntry->limSystemRole)
-                  WDA_TxAbort(psessionEntry->smeSessionId);
-        }
+        /* Send Disassoc CNF and receive path cleanup */
+        limSendDisassocCnf(pMac);
+	/*
+	 * Abort Tx so that data frames won't be sent to the AP
+	 * after sending Disassoc.
+	 */
+	if (LIM_IS_STA_ROLE(psessionEntry))
+		WDA_TxAbort(psessionEntry->smeSessionId);
     }
     else
     {
@@ -3100,7 +3112,9 @@ limProcessMlmDeauthReqNtf(tpAniSirGlobal pMac, eHalStatus suspendStatus, tANI_U3
     tLimMlmDeauthReq        *pMlmDeauthReq;
     tLimMlmDeauthCnf        mlmDeauthCnf;
     tpPESession             psessionEntry;
-
+    tSirSmeDeauthRsp        *pSirSmeDeauthRsp;
+    tANI_U8                 *pBuf;
+    tANI_U32                *pMsg;
 
     if(eHAL_STATUS_SUCCESS != suspendStatus)
     {
@@ -3149,11 +3163,37 @@ limProcessMlmDeauthReqNtf(tpAniSirGlobal pMac, eHalStatus suspendStatus, tANI_U3
                            MAC_ADDR_ARRAY(pMlmDeauthReq->peerMacAddr),
                            MAC_ADDR_ARRAY(currentBssId));
 
-                        /// Prepare and Send LIM_MLM_DEAUTH_CNF
+                        /*
+                         * Deauthentication response to host triggered
+                         * deauthentication.
+                         */
+                        pSirSmeDeauthRsp =
+                            vos_mem_malloc(sizeof(tSirSmeDeauthRsp));
+                        if (NULL == pSirSmeDeauthRsp) {
+                            /* Log error */
+                            limLog(pMac, LOGP,
+                                FL("call to AllocateMemory failed for eWNI_SME_DEAUTH_RSP"));
+                            return;
+                        }
+                        limLog(pMac, LOG1,
+                            FL("send eWNI_SME_DEAUTH_RSP with retCode: %d for " MAC_ADDRESS_STR),
+                            eSIR_SME_DEAUTH_STATUS,
+                            MAC_ADDR_ARRAY(pMlmDeauthReq->peerMacAddr));
+                        pSirSmeDeauthRsp->messageType = eWNI_SME_DEAUTH_RSP;
+                        pSirSmeDeauthRsp->length = sizeof(tSirSmeDeauthRsp);
+                        pSirSmeDeauthRsp->statusCode = eSIR_SME_DEAUTH_STATUS;
+                        pSirSmeDeauthRsp->sessionId = pMlmDeauthReq->sessionId;
+                        pSirSmeDeauthRsp->transactionId = 0;
 
-                        mlmDeauthCnf.resultCode = eSIR_SME_INVALID_PARAMETERS;
+                       pBuf = (tANI_U8 *) pSirSmeDeauthRsp->peerMacAddr;
+                       vos_mem_copy(pBuf, pMlmDeauthReq->peerMacAddr,
+                           sizeof(tSirMacAddr));
+                       pMsg = (tANI_U32*)pSirSmeDeauthRsp;
 
-                        goto end;
+                       limSendSmeDisassocDeauthNtf(pMac, eHAL_STATUS_SUCCESS,
+                                            (tANI_U32*) pMsg);
+
+                       return;
                     }
 
                     if ((psessionEntry->limMlmState ==

@@ -1151,31 +1151,10 @@ static eHalStatus limSendHalStartScanOffloadReq(tpAniSirGlobal pMac,
     tANI_U8 *vht_cap_ie;
     tANI_U16 vht_cap_len = 0;
 #endif /* WLAN_FEATURE_11AC */
-    tSirRetStatus status, rc = eSIR_SUCCESS;
-    tDot11fIEExtCap extracted_extcap = {0};
-    bool extcap_present = true;
+    tSirRetStatus rc = eSIR_SUCCESS;
 
     pMac->lim.fOffloadScanPending = 0;
     pMac->lim.fOffloadScanP2PSearch = 0;
-
-    if (pScanReq->uIEFieldLen) {
-        status = lim_strip_extcap_update_struct(pMac,
-                     (uint8_t *) pScanReq + pScanReq->uIEFieldOffset,
-                     &pScanReq->uIEFieldLen, &extracted_extcap);
-
-        if (eSIR_SUCCESS != status) {
-            extcap_present = false;
-            limLog(pMac, LOG1, FL("Unable to Strip ExtCap IE from Scan Req"));
-        }
-
-        if (extcap_present) {
-            limLog(pMac, LOG1, FL("Extcap was part of SCAN IE - Updating FW"));
-            lim_send_ext_cap_ie(pMac, pScanReq->sessionId,
-                                &extracted_extcap, true);
-        }
-    } else {
-        limLog(pMac, LOG1, FL("No IEs in the scan request from supplicant"));
-    }
 
     /* The tSirScanOffloadReq will reserve the space for first channel,
        so allocate the memory for (numChannels - 1) and uIEFieldLen */
@@ -3013,6 +2992,20 @@ __limProcessSmeDisassocCnf(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
                "does not have context, addr= "MAC_ADDRESS_STR),
                      MAC_ADDR_ARRAY(smeDisassocCnf.peerMacAddr));)
             return;
+        }
+
+        /*
+         * If MlM state is either of del_sta or del_bss state, then no need to
+         * go ahead and clean up further as there must be some cleanup in
+         * progress from upper layer disassoc/deauth request.
+         */
+        if((pStaDs->mlmStaContext.mlmState == eLIM_MLM_WT_DEL_STA_RSP_STATE) ||
+           (pStaDs->mlmStaContext.mlmState == eLIM_MLM_WT_DEL_BSS_RSP_STATE)) {
+            limLog(pMac, LOGE, FL("No need to cleanup for addr:"MAC_ADDRESS_STR
+                   "as Mlm state is %d"),
+                   MAC_ADDR_ARRAY(smeDisassocCnf.peerMacAddr),
+                   pStaDs->mlmStaContext.mlmState);
+           return;
         }
 
 #if defined WLAN_FEATURE_VOWIFI_11R

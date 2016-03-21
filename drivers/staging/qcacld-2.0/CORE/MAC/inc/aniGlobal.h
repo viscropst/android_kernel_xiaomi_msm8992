@@ -1123,6 +1123,7 @@ typedef struct sMacOpenParameters
 
     bool      tx_chain_mask_cck;
     uint16_t  self_gen_frm_pwr;
+    bool force_target_assert_enabled;
 } tMacOpenParameters;
 
 typedef struct sHalMacStartParameters
@@ -1251,6 +1252,7 @@ typedef struct sAniSirGlobal
     struct vdev_type_nss vdev_type_nss_2g;
     struct vdev_type_nss vdev_type_nss_5g;
     t_auth_ack_status auth_ack_status;
+    bool first_scan_done;
 } tAniSirGlobal;
 
 typedef enum

@@ -9168,6 +9168,9 @@ VOS_STATUS hdd_reconnect_all_adapters( hdd_context_t *pHddCtx )
          hddLog(VOS_TRACE_LEVEL_INFO,
             "%s: Set HDD connState to eConnectionState_NotConnected",
                    __func__);
+         if (eConnectionState_Associated == pHddStaCtx->conn_info.connState) {
+             wlan_hdd_decr_active_session(pHddCtx, pAdapter->device_mode);
+         }
          pHddStaCtx->conn_info.connState = eConnectionState_NotConnected;
          init_completion(&pAdapter->disconnect_comp_var);
          sme_RoamDisconnect(pHddCtx->hHal, pAdapter->sessionId,
@@ -11680,7 +11683,6 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
 
    mutex_init(&pHddCtx->sap_lock);
 
-   pHddCtx->isLoadInProgress = FALSE;
    pHddCtx->wifi_turn_on_time_since_boot = vos_get_monotonic_boottime();
 
 #ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
@@ -11693,8 +11695,6 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
            "qcom_sap_wakelock");
 
    hdd_hostapd_channel_wakelock_init(pHddCtx);
-
-   vos_set_load_unload_in_progress(VOS_MODULE_ID_VOSS, FALSE);
 
    // Initialize the restart logic
    wlan_hdd_restart_init(pHddCtx);
@@ -11833,7 +11833,6 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
     * So that we can reconfigure the offload parameters
     */
    hdd_wlan_register_ip6_notifier(pHddCtx);
-
    /*
     * Register IPv4 notifier to notify if any change in IP
     * So that we can reconfigure the offload parameters
@@ -11845,7 +11844,10 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    else
       hddLog(LOGE, FL("Registered IPv4 notifier"));
 
+   pHddCtx->isLoadInProgress = FALSE;
+   vos_set_load_unload_in_progress(VOS_MODULE_ID_VOSS, FALSE);
    complete(&wlan_start_comp);
+
    goto success;
 
 err_nl_srv:
@@ -11996,6 +11998,14 @@ static int hdd_driver_init( void)
 
    ENTER();
 
+#ifdef TIMER_MANAGER
+      vos_timer_manager_init();
+#endif
+
+#ifdef MEMORY_DEBUG
+      vos_mem_init();
+#endif
+
    vos_wake_lock_init(&wlan_wake_lock, "wlan");
    hdd_prevent_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_INIT);
    /*
@@ -12035,14 +12045,6 @@ static int hdd_driver_init( void)
          }
          return ret_status;
       }
-#endif
-
-#ifdef TIMER_MANAGER
-      vos_timer_manager_init();
-#endif
-
-#ifdef MEMORY_DEBUG
-      vos_mem_init();
 #endif
 
       /* Preopen VOSS so that it is ready to start at least SAL */
