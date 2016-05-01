@@ -32,6 +32,9 @@
 #ifdef KERNEL_ABOVE_2_6_38
 #include <linux/input/mt.h>
 #endif
+#include <asm/uaccess.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 #define INPUT_PHYS_NAME "synaptics_dsx/touch_input"
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_EDGE_SUPPORT
@@ -626,6 +629,10 @@ struct synaptics_rmi4_exp_fn_data {
 };
 
 static struct synaptics_rmi4_exp_fn_data exp_data;
+
+struct proc_dir_entry *rmi4_proc_parent;
+struct proc_dir_entry *rmi4_0dbutton_proc_entry;
+struct proc_dir_entry *rmi4_wake_gesture_proc_entry;
 
 struct synaptics_dsx_button_map *vir_button_map;
 
@@ -3871,6 +3878,187 @@ exit:
 }
 EXPORT_SYMBOL(synaptics_rmi4_new_function);
 
+static int synaptics_rmi4_0dbutton_show_proc(struct seq_file *m, void *v)
+{
+	struct synaptics_rmi4_data *rmi4_data;
+
+	if (exp_data.rmi4_data)
+		rmi4_data = exp_data.rmi4_data;
+	else
+		return -ENOMEM;
+
+	return seq_printf(m, "%u\n", rmi4_data->button_0d_enabled);
+}
+
+static int synaptics_rmi4_0dbutton_open_proc(struct inode *inode, struct file *file)
+{
+	return single_open(file, synaptics_rmi4_0dbutton_show_proc, inode->i_private);
+}
+
+static ssize_t synaptics_rmi4_0dbutton_write_proc(struct file *file,
+			const char __user *buf, size_t count, loff_t *ppos)
+{
+	int retval;
+	unsigned int input;
+	unsigned char ii;
+	unsigned char intr_enable;
+	struct synaptics_rmi4_fn *fhandler;
+	struct synaptics_rmi4_data *rmi4_data;
+	struct synaptics_rmi4_device_info *rmi;
+
+	if (exp_data.rmi4_data)
+		rmi4_data = exp_data.rmi4_data;
+	else
+		return -ENOMEM;
+
+	rmi = &(rmi4_data->rmi4_mod_info);
+
+	if (sscanf(buf, "%u", &input) != 1)
+		return -EINVAL;
+
+	input = input > 0 ? 1 : 0;
+
+	if (rmi4_data->button_0d_enabled == input)
+		return count;
+
+	if (list_empty(&rmi->support_fn_list))
+		return -ENODEV;
+
+	list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
+		if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
+			ii = fhandler->intr_reg_num;
+
+			retval = synaptics_rmi4_reg_read(rmi4_data,
+					rmi4_data->f01_ctrl_base_addr + 1 + ii,
+					&intr_enable,
+					sizeof(intr_enable));
+			if (retval < 0)
+				return retval;
+
+			if (input == 1)
+				intr_enable |= fhandler->intr_mask;
+			else
+				intr_enable &= ~fhandler->intr_mask;
+
+			retval = synaptics_rmi4_reg_write(rmi4_data,
+					rmi4_data->f01_ctrl_base_addr + 1 + ii,
+					&intr_enable,
+					sizeof(intr_enable));
+			if (retval < 0)
+				return retval;
+		}
+	}
+
+	rmi4_data->button_0d_enabled = input;
+
+	return count;
+}
+
+static int synaptics_rmi4_wake_gesture_show_proc(struct seq_file *m, void *v)
+{
+	struct synaptics_rmi4_data *rmi4_data;
+
+	if (exp_data.rmi4_data)
+		rmi4_data = exp_data.rmi4_data;
+	else
+		return -ENOMEM;
+
+	return seq_printf(m, "%u\n", rmi4_data->enable_wakeup_gesture);
+}
+
+static int synaptics_rmi4_wake_gesture_open_proc(struct inode *inode, struct file *file)
+{
+	return single_open(file, synaptics_rmi4_wake_gesture_show_proc, inode->i_private);
+}
+
+static ssize_t synaptics_rmi4_wake_gesture_write_proc(struct file *file,
+			const char __user *buf, size_t count, loff_t *ppos)
+{
+	unsigned int input;
+	struct synaptics_rmi4_data *rmi4_data;
+	const struct synaptics_dsx_board_data *bdata;
+
+	if (exp_data.rmi4_data) {
+		rmi4_data = exp_data.rmi4_data;
+		bdata = rmi4_data->hw_if->board_data;
+	} else {
+		return -ENOMEM;
+	}
+
+	if (sscanf(buf, "%u", &input) != 1)
+		return -EINVAL;
+
+	if (bdata->cut_off_power) {
+		dev_err(rmi4_data->pdev->dev.parent,
+			"%s: Unable to switch wakeup gesture mode\n", __func__);
+		return count;
+	}
+
+	input = input > 0 ? 1 : 0;
+
+	if (rmi4_data->f11_wakeup_gesture || rmi4_data->f12_wakeup_gesture)
+		rmi4_data->enable_wakeup_gesture = input;
+
+	if (rmi4_data->suspend)
+		synaptics_rmi4_wakeup_reconfigure(rmi4_data, (bool)input);
+
+	return count;
+}
+
+static const struct file_operations rmi4_0dbutton_proc_fops = {
+	.owner		= THIS_MODULE,
+	.open		= synaptics_rmi4_0dbutton_open_proc,
+	.read		= seq_read,
+	.write		= synaptics_rmi4_0dbutton_write_proc,
+	.release	= single_release,
+};
+
+static const struct file_operations rmi4_wake_gesture_proc_fops = {
+	.owner		= THIS_MODULE,
+	.open		= synaptics_rmi4_wake_gesture_open_proc,
+	.read		= seq_read,
+	.write		= synaptics_rmi4_wake_gesture_write_proc,
+	.release	= single_release,
+};
+
+static int synaptics_rmi4_init_proc(void)
+{
+	rmi4_proc_parent = proc_mkdir("synaptics_dsx", NULL);
+	if (!rmi4_proc_parent) {
+		printk(KERN_ERR "%s: Unable to create synaptics_dsx proc entry\n", __func__);
+		return -ENOMEM;
+	}
+
+	rmi4_0dbutton_proc_entry = proc_create("0dbutton", 0664,
+									rmi4_proc_parent, &rmi4_0dbutton_proc_fops);
+	if (!rmi4_0dbutton_proc_entry) {
+		printk(KERN_ERR "%s: Unable to create 0dbutton proc entry\n", __func__);
+		return -ENOMEM;
+	}
+
+	rmi4_wake_gesture_proc_entry = proc_create("wake_gesture", 0664,
+									rmi4_proc_parent, &rmi4_wake_gesture_proc_fops);
+	if (!rmi4_0dbutton_proc_entry) {
+		printk(KERN_ERR "%s: Unable to create wake_gesture proc entry\n", __func__);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static int synaptics_rmi4_remove_proc(void)
+{
+	if (rmi4_proc_parent) {
+		if (rmi4_0dbutton_proc_entry)
+			remove_proc_entry("0dbutton", rmi4_proc_parent);
+		if (rmi4_wake_gesture_proc_entry)
+			remove_proc_entry("wake_gesture", rmi4_proc_parent);
+		remove_proc_entry("synaptics_dsx", NULL);
+	}
+
+	return 0;
+}
+
 static int synaptics_rmi4_probe(struct platform_device *pdev)
 {
 	int retval;
@@ -4059,6 +4247,9 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 			&exp_data.work,
 			0);
 
+	/* Ketut P. Kumajaya: Initialize procfs for user space access */
+	synaptics_rmi4_init_proc();
+
 	INIT_DELAYED_WORK(&rmi4_data->calibration_delayed_work,
 			synaptics_rmi4_calibration_delayed_work);
 	INIT_DELAYED_WORK(&rmi4_data->resume_delayed_work,
@@ -4156,6 +4347,9 @@ static int synaptics_rmi4_remove(struct platform_device *pdev)
 	flush_workqueue(rmi4_data->reset_workqueue);
 	destroy_workqueue(rmi4_data->reset_workqueue);
 #endif
+
+	/* Ketut P. Kumajaya: De-initialize procfs */
+	synaptics_rmi4_remove_proc();
 
 	cancel_delayed_work_sync(&exp_data.work);
 	flush_workqueue(exp_data.workqueue);
