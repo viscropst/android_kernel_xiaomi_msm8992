@@ -759,29 +759,22 @@ static ssize_t synaptics_rmi4_0dbutton_show(struct device *dev,
 			rmi4_data->button_0d_enabled);
 }
 
-static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static void synaptics_rmi4_0dbutton_update(struct synaptics_rmi4_data *rmi4_data,
+		unsigned int input)
 {
 	int retval;
-	unsigned int input;
 	unsigned char ii;
 	unsigned char intr_enable;
 	struct synaptics_rmi4_fn *fhandler;
-	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
 	struct synaptics_rmi4_device_info *rmi;
+
+	if (rmi4_data->button_0d_enabled == input)
+		return;
 
 	rmi = &(rmi4_data->rmi4_mod_info);
 
-	if (sscanf(buf, "%u", &input) != 1)
-		return -EINVAL;
-
-	input = input > 0 ? 1 : 0;
-
-	if (rmi4_data->button_0d_enabled == input)
-		return count;
-
 	if (list_empty(&rmi->support_fn_list))
-		return -ENODEV;
+		return;
 
 	list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
 		if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
@@ -792,7 +785,7 @@ static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
 					&intr_enable,
 					sizeof(intr_enable));
 			if (retval < 0)
-				return retval;
+				return;
 
 			if (input == 1)
 				intr_enable |= fhandler->intr_mask;
@@ -804,11 +797,27 @@ static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
 					&intr_enable,
 					sizeof(intr_enable));
 			if (retval < 0)
-				return retval;
+				return;
 		}
 	}
 
 	rmi4_data->button_0d_enabled = input;
+
+	return;
+}
+
+static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int input;
+	struct synaptics_rmi4_data *rmi4_data = dev_get_drvdata(dev);
+
+	if (sscanf(buf, "%u", &input) != 1)
+		return -EINVAL;
+
+	input = input > 0 ? 1 : 0;
+
+	synaptics_rmi4_0dbutton_update(rmi4_data, input);
 
 	return count;
 }
@@ -3898,58 +3907,20 @@ static int synaptics_rmi4_0dbutton_open_proc(struct inode *inode, struct file *f
 static ssize_t synaptics_rmi4_0dbutton_write_proc(struct file *file,
 			const char __user *buf, size_t count, loff_t *ppos)
 {
-	int retval;
 	unsigned int input;
-	unsigned char ii;
-	unsigned char intr_enable;
-	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data;
-	struct synaptics_rmi4_device_info *rmi;
 
 	if (exp_data.rmi4_data)
 		rmi4_data = exp_data.rmi4_data;
 	else
 		return -ENOMEM;
 
-	rmi = &(rmi4_data->rmi4_mod_info);
-
 	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	input = input > 0 ? 1 : 0;
 
-	if (rmi4_data->button_0d_enabled == input)
-		return count;
-
-	if (list_empty(&rmi->support_fn_list))
-		return -ENODEV;
-
-	list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-		if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
-			ii = fhandler->intr_reg_num;
-
-			retval = synaptics_rmi4_reg_read(rmi4_data,
-					rmi4_data->f01_ctrl_base_addr + 1 + ii,
-					&intr_enable,
-					sizeof(intr_enable));
-			if (retval < 0)
-				return retval;
-
-			if (input == 1)
-				intr_enable |= fhandler->intr_mask;
-			else
-				intr_enable &= ~fhandler->intr_mask;
-
-			retval = synaptics_rmi4_reg_write(rmi4_data,
-					rmi4_data->f01_ctrl_base_addr + 1 + ii,
-					&intr_enable,
-					sizeof(intr_enable));
-			if (retval < 0)
-				return retval;
-		}
-	}
-
-	rmi4_data->button_0d_enabled = input;
+	synaptics_rmi4_0dbutton_update(rmi4_data, input);
 
 	return count;
 }
@@ -4724,6 +4695,9 @@ static int synaptics_rmi4_suspend(struct device *dev)
 		if (rmi4_data->suspend)
 			return 0;
 
+		/* Ketut P. Kumajaya: Revert button enabler on suspend */
+		synaptics_rmi4_0dbutton_update(rmi4_data, !rmi4_data->button_0d_enabled);
+
 		if (rmi4_data->enable_wakeup_gesture) {
 			synaptics_rmi4_wakeup_gesture(rmi4_data, true);
 			synaptics_rmi4_free_fingers(rmi4_data);
@@ -4781,6 +4755,9 @@ static int synaptics_rmi4_resume(struct device *dev)
 		schedule_delayed_work(&rmi4_data->resume_delayed_work,
 				msecs_to_jiffies(bdata->reset_delay_ms));
 	} else {
+		/* Ketut P. Kumajaya: Revert button enabler on resume */
+		synaptics_rmi4_0dbutton_update(rmi4_data, !rmi4_data->button_0d_enabled);
+
 		if (rmi4_data->enable_wakeup_gesture)
 			synaptics_rmi4_wakeup_gesture(rmi4_data, false);
 		else {
