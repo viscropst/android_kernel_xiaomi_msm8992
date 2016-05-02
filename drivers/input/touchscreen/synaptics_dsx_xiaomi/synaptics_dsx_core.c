@@ -4695,9 +4695,6 @@ static int synaptics_rmi4_suspend(struct device *dev)
 		if (rmi4_data->suspend)
 			return 0;
 
-		/* Ketut P. Kumajaya: Revert button enabler on suspend */
-		synaptics_rmi4_0dbutton_update(rmi4_data, !rmi4_data->button_0d_enabled);
-
 		if (rmi4_data->enable_wakeup_gesture) {
 			synaptics_rmi4_wakeup_gesture(rmi4_data, true);
 			synaptics_rmi4_free_fingers(rmi4_data);
@@ -4721,6 +4718,8 @@ static int synaptics_rmi4_suspend(struct device *dev)
 
 exit:
 	rmi4_data->suspend = true;
+	/* Ketut P. Kumajaya: Revert button enabler on suspend */
+	synaptics_rmi4_0dbutton_update(rmi4_data, !rmi4_data->button_0d_enabled);
 
 	return 0;
 }
@@ -4755,9 +4754,6 @@ static int synaptics_rmi4_resume(struct device *dev)
 		schedule_delayed_work(&rmi4_data->resume_delayed_work,
 				msecs_to_jiffies(bdata->reset_delay_ms));
 	} else {
-		/* Ketut P. Kumajaya: Revert button enabler on resume */
-		synaptics_rmi4_0dbutton_update(rmi4_data, !rmi4_data->button_0d_enabled);
-
 		if (rmi4_data->enable_wakeup_gesture)
 			synaptics_rmi4_wakeup_gesture(rmi4_data, false);
 		else {
@@ -4779,6 +4775,9 @@ static int synaptics_rmi4_resume(struct device *dev)
 
 		rmi4_data->suspend = false;
 	}
+
+	/* Ketut P. Kumajaya: Revert button enabler on resume */
+	synaptics_rmi4_0dbutton_update(rmi4_data, !rmi4_data->button_0d_enabled);
 
 	return 0;
 }
