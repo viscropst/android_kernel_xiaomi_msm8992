@@ -38,6 +38,10 @@
 #include <linux/msm_bcl.h>
 #include <linux/ktime.h>
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+#undef CONFIG_MACH_XIAOMI_MSM8992
+#endif
+
 /* Mask/Bit helpers */
 #define _SMB_MASK(BITS, POS) \
 	((unsigned char)(((1 << (BITS)) - 1) << (POS)))
