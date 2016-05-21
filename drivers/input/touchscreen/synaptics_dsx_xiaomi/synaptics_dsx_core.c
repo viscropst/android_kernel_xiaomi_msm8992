@@ -4009,7 +4009,7 @@ static int synaptics_rmi4_init_proc(void)
 
 	rmi4_wake_gesture_proc_entry = proc_create("wake_gesture", 0664,
 									rmi4_proc_parent, &rmi4_wake_gesture_proc_fops);
-	if (!rmi4_0dbutton_proc_entry) {
+	if (!rmi4_wake_gesture_proc_entry) {
 		printk(KERN_ERR "%s: Unable to create wake_gesture proc entry\n", __func__);
 		return -ENOMEM;
 	}
