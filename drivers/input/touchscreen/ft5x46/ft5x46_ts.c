@@ -2530,16 +2530,16 @@ static const struct file_operations ft5x46_wakeup_mode_proc_fops = {
 
 static int ft5x46_init_proc(void)
 {
-	ft5x46_proc_parent = proc_mkdir("focaltech_ft5x46", NULL);
+	ft5x46_proc_parent = proc_mkdir("touchscreen", NULL);
 	if (!ft5x46_proc_parent) {
-		printk(KERN_ERR "%s: Unable to create focaltech_ft5x46 proc entry\n", __func__);
+		printk(KERN_ERR "%s: Unable to create touchscreen proc entry\n", __func__);
 		return -ENOMEM;
 	}
 
-	ft5x46_wakeup_mode_proc_entry = proc_create("wakeup_mode", 0664,
+	ft5x46_wakeup_mode_proc_entry = proc_create("double_tap_enable", 0664,
 									ft5x46_proc_parent, &ft5x46_wakeup_mode_proc_fops);
 	if (!ft5x46_wakeup_mode_proc_entry) {
-		printk(KERN_ERR "%s: Unable to create wakeup_mode proc entry\n", __func__);
+		printk(KERN_ERR "%s: Unable to create double_tap_enable proc entry\n", __func__);
 		return -ENOMEM;
 	}
 
@@ -2550,8 +2550,8 @@ static int ft5x46_remove_proc(void)
 {
 	if (ft5x46_proc_parent) {
 		if (ft5x46_wakeup_mode_proc_entry)
-			remove_proc_entry("wakeup_mode", ft5x46_proc_parent);
-		remove_proc_entry("focaltech_ft5x46", NULL);
+			remove_proc_entry("double_tap_enable", ft5x46_proc_parent);
+		remove_proc_entry("touchscreen", NULL);
 	}
 
 	return 0;
