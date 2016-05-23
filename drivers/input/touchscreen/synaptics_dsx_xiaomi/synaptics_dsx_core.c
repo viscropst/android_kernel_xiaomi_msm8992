@@ -3994,23 +3994,23 @@ static const struct file_operations rmi4_wake_gesture_proc_fops = {
 
 static int synaptics_rmi4_init_proc(void)
 {
-	rmi4_proc_parent = proc_mkdir("synaptics_dsx", NULL);
+	rmi4_proc_parent = proc_mkdir("touchscreen", NULL);
 	if (!rmi4_proc_parent) {
-		printk(KERN_ERR "%s: Unable to create synaptics_dsx proc entry\n", __func__);
+		printk(KERN_ERR "%s: Unable to create touchscreen proc entry\n", __func__);
 		return -ENOMEM;
 	}
 
-	rmi4_0dbutton_proc_entry = proc_create("0dbutton", 0664,
+	rmi4_0dbutton_proc_entry = proc_create("nav_button_enable", 0664,
 									rmi4_proc_parent, &rmi4_0dbutton_proc_fops);
 	if (!rmi4_0dbutton_proc_entry) {
-		printk(KERN_ERR "%s: Unable to create 0dbutton proc entry\n", __func__);
+		printk(KERN_ERR "%s: Unable to create nav_button_enable proc entry\n", __func__);
 		return -ENOMEM;
 	}
 
-	rmi4_wake_gesture_proc_entry = proc_create("wake_gesture", 0664,
+	rmi4_wake_gesture_proc_entry = proc_create("double_tap_enable", 0664,
 									rmi4_proc_parent, &rmi4_wake_gesture_proc_fops);
 	if (!rmi4_wake_gesture_proc_entry) {
-		printk(KERN_ERR "%s: Unable to create wake_gesture proc entry\n", __func__);
+		printk(KERN_ERR "%s: Unable to create double_tap_enable proc entry\n", __func__);
 		return -ENOMEM;
 	}
 
@@ -4021,10 +4021,10 @@ static int synaptics_rmi4_remove_proc(void)
 {
 	if (rmi4_proc_parent) {
 		if (rmi4_0dbutton_proc_entry)
-			remove_proc_entry("0dbutton", rmi4_proc_parent);
+			remove_proc_entry("nav_button_enable", rmi4_proc_parent);
 		if (rmi4_wake_gesture_proc_entry)
-			remove_proc_entry("wake_gesture", rmi4_proc_parent);
-		remove_proc_entry("synaptics_dsx", NULL);
+			remove_proc_entry("double_tap_enable", rmi4_proc_parent);
+		remove_proc_entry("touchscreen", NULL);
 	}
 
 	return 0;
