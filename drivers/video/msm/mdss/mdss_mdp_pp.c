@@ -346,8 +346,6 @@ struct mdss_pp_res_type {
 	struct pp_sts_type pp_disp_sts[MDSS_MAX_MIXER_DISP_NUM];
 	/* physical info */
 	struct pp_hist_col_info *dspp_hist;
-        struct mdp_pcc_cfg_data raw_pcc_disp_cfg[MDSS_BLOCK_DISP_NUM];
-	struct mdp_pcc_cfg_data user_pcc_disp_cfg[MDSS_BLOCK_DISP_NUM];
 };
 
 static DEFINE_MUTEX(mdss_pp_mutex);
@@ -2691,6 +2689,7 @@ static void pp_update_pcc_regs(char __iomem *addr,
 	writel_relaxed(cfg_ptr->b.rgb_1, addr + 8);
 }
 
+<<<<<<< HEAD
 static u32 pcc_rescale(u32 raw, u32 user)
 {
  	int val = 0;
@@ -2785,6 +2784,8 @@ int mdss_mdp_user_pcc_config(struct mdp_pcc_cfg_data *config)
  	return ret;
 }
 
+=======
+>>>>>>> e7f7b47... Revert "video: mdss: LiveDisplay driver"
 int mdss_mdp_pcc_config(struct mdp_pcc_cfg_data *config,
 					u32 *copyback)
 {
@@ -2820,10 +2821,14 @@ int mdss_mdp_pcc_config(struct mdp_pcc_cfg_data *config,
 		*copyback = 1;
 		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 	} else {
+<<<<<<< HEAD
 		mdss_pp_res->raw_pcc_disp_cfg[disp_num] = *config;
  		pcc_combine(&mdss_pp_res->raw_pcc_disp_cfg[disp_num],
  					&mdss_pp_res->user_pcc_disp_cfg[disp_num],
  					&mdss_pp_res->pcc_disp_cfg[disp_num]);
+=======
+		mdss_pp_res->pcc_disp_cfg[disp_num] = *config;
+>>>>>>> e7f7b47... Revert "video: mdss: LiveDisplay driver"
 		mdss_pp_res->pp_disp_flags[disp_num] |= PP_FLAGS_DIRTY_PCC;
 	}
 
