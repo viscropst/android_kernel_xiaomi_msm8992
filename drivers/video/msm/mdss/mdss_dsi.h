@@ -176,15 +176,6 @@ enum dsi_pm_type {
 		DSI_INTR_CMD_MDP_DONE_MASK | \
 		DSI_INTR_CMD_DMA_DONE_MASK)
 
-#define DSI_INTR_MASK_ALL	\
-		(DSI_INTR_DESJEW_MASK | \
-		DSI_INTR_DYNAMIC_REFRESH_MASK | \
-		DSI_INTR_ERROR_MASK | \
-		DSI_INTR_BTA_DONE_MASK | \
-		DSI_INTR_VIDEO_DONE_MASK | \
-		DSI_INTR_CMD_MDP_DONE_MASK | \
-		DSI_INTR_CMD_DMA_DONE_MASK)
-
 #define DSI_CMD_TRIGGER_NONE		0x0	/* mdp trigger */
 #define DSI_CMD_TRIGGER_TE		0x02
 #define DSI_CMD_TRIGGER_SW		0x04
@@ -358,7 +349,6 @@ struct mdss_dsi_ctrl_pdata {
 	int rst_gpio;
 	int disp_en_gpio;
 	int bklt_en_gpio;
-	int dual_en_gpio;	/*Mipi dsi dual port select pin*/
 	int mode_gpio;
 	int bklt_ctrl;	/* backlight ctrl */
 	bool pwm_pmi;
@@ -368,7 +358,6 @@ struct mdss_dsi_ctrl_pdata {
 	int bklt_max;
 	int new_fps;
 	int pwm_enabled;
-	int on_cmds_tuning;
 	int clk_lane_cnt;
 	bool dmap_iommu_map;
 	bool panel_bias_vreg;
@@ -413,7 +402,6 @@ struct mdss_dsi_ctrl_pdata {
 	int mdp_busy;
 	struct mutex mutex;
 	struct mutex cmd_mutex;
-	struct mutex dsi_ctrl_mutex;
 	struct regulator *lab; /* vreg handle */
 	struct regulator *ibb; /* vreg handle */
 	struct mutex clk_lane_mutex;
@@ -424,7 +412,6 @@ struct mdss_dsi_ctrl_pdata {
 	bool core_power;
 	bool mmss_clamp;
 	bool timing_db_mode;
-	bool dsi_pipe_ready;
 
 	struct dsi_buf tx_buf;
 	struct dsi_buf rx_buf;
