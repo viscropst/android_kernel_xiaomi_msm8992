@@ -752,12 +752,14 @@ struct mxt_data {
 #ifdef CONFIG_FB
 	struct notifier_block fb_notif;
 #endif
+	u8 nav_button_enable;
 };
 
 struct mxt_data *mx_data;
 
 struct proc_dir_entry *mxt_proc_parent;
 struct proc_dir_entry *mxt_wakeup_mode_proc_entry;
+struct proc_dir_entry *mxt_nav_button_proc_entry;
 
 static struct mxt_suspend mxt_save[] = {
 	{MXT_GEN_POWER_T7, MXT_POWER_IDLEACQINT,
@@ -1578,7 +1580,7 @@ static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
 
 	for (key = 0; key < pdata->config_array[index].key_num; key++) {
 		curr_state = test_bit(key, &data->keystatus);
-		new_state = test_bit(key, &keystates);
+		new_state = test_bit(key, &keystates) && data->nav_button_enable;
 
 		if (!curr_state && new_state) {
 			dev_dbg(dev, "T15 key press: %u\n", key);
@@ -1787,7 +1789,7 @@ static void mxt_proc_t97_messages(struct mxt_data *data, u8 *msg)
 
 	for (key = 0; key < pdata->config_array[index].key_num; key++) {
 		curr_state = test_bit(key, &data->keystatus);
-		new_state = test_bit(key, &keystates);
+		new_state = test_bit(key, &keystates) && data->nav_button_enable;
 
 		if (!curr_state && new_state) {
 			dev_dbg(dev, "T97 key press: %u, key_code = %u\n", key, pdata->config_array[index].key_codes[key]);
@@ -5663,6 +5665,7 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 	}
 
 	data->input_dev = input_dev;
+	data->nav_button_enable = 1;
 
 	return 0;
 }
@@ -6270,11 +6273,49 @@ static ssize_t mxt_wakeup_mode_write_proc(struct file *file,
 	return error ? : count;
 }
 
+static int mxt_nav_button_show_proc(struct seq_file *m, void *v)
+{
+	if (mx_data)
+		return seq_printf(m, "%d\n", (int)mx_data->nav_button_enable);
+	else
+		return -ENOMEM;
+}
+
+static int mxt_nav_button_open_proc(struct inode *inode, struct file *file)
+{
+	return single_open(file, mxt_nav_button_show_proc, inode->i_private);
+}
+
+static ssize_t mxt_nav_button_write_proc(struct file *file,
+			const char __user *buf, size_t count, loff_t *ppos)
+{
+	unsigned long val;
+	int error;
+
+	if (!mx_data)
+		return -ENOMEM;
+
+	error = strict_strtoul(buf, 0, &val);
+
+	if (!error)
+		mx_data->nav_button_enable = (u8)val;
+
+	return error ? : count;
+}
+
 static const struct file_operations mxt_wakeup_mode_proc_fops = {
 	.owner		= THIS_MODULE,
 	.open		= mxt_wakeup_mode_open_proc,
 	.read		= seq_read,
 	.write		= mxt_wakeup_mode_write_proc,
+	.release	= single_release,
+};
+
+static const struct file_operations mxt_nav_button_proc_fops = {
+	.owner		= THIS_MODULE,
+	.open		= mxt_nav_button_open_proc,
+	.read		= seq_read,
+	.write		= mxt_nav_button_write_proc,
 	.release	= single_release,
 };
 
@@ -6290,6 +6331,13 @@ static int mxt_init_proc(void)
 									mxt_proc_parent, &mxt_wakeup_mode_proc_fops);
 	if (!mxt_wakeup_mode_proc_entry) {
 		printk(KERN_ERR "%s: Unable to create double_tap_enable proc entry\n", __func__);
+		return -ENOMEM;
+	}
+
+	mxt_nav_button_proc_entry = proc_create("nav_button_enable", 0664,
+									mxt_proc_parent, &mxt_nav_button_proc_fops);
+	if (!mxt_nav_button_proc_entry) {
+		printk(KERN_ERR "%s: Unable to create nav_button_enable proc entry\n", __func__);
 		return -ENOMEM;
 	}
 
