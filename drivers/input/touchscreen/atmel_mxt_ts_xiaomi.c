@@ -752,10 +752,11 @@ struct mxt_data {
 #ifdef CONFIG_FB
 	struct notifier_block fb_notif;
 #endif
-	u8 nav_button_enable;
 };
 
 struct mxt_data *mx_data;
+
+static unsigned int nav_button_enable;
 
 struct proc_dir_entry *mxt_proc_parent;
 struct proc_dir_entry *mxt_wakeup_mode_proc_entry;
@@ -1575,12 +1576,15 @@ static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
 	unsigned long keystates = le32_to_cpu(msg[2]);
 	int index = data->current_index;
 
+	if (!nav_button_enable)
+		return;
+
 	if (!input_dev)
 		return;
 
 	for (key = 0; key < pdata->config_array[index].key_num; key++) {
 		curr_state = test_bit(key, &data->keystatus);
-		new_state = test_bit(key, &keystates) && data->nav_button_enable;
+		new_state = test_bit(key, &keystates);
 
 		if (!curr_state && new_state) {
 			dev_dbg(dev, "T15 key press: %u\n", key);
@@ -1784,12 +1788,15 @@ static void mxt_proc_t97_messages(struct mxt_data *data, u8 *msg)
 	bool sync = false;
 	unsigned long keystates = le32_to_cpu(msg[2]);
 
+	if (!nav_button_enable)
+		return;
+
 	if (!input_dev)
 		return;
 
 	for (key = 0; key < pdata->config_array[index].key_num; key++) {
 		curr_state = test_bit(key, &data->keystatus);
-		new_state = test_bit(key, &keystates) && data->nav_button_enable;
+		new_state = test_bit(key, &keystates);
 
 		if (!curr_state && new_state) {
 			dev_dbg(dev, "T97 key press: %u, key_code = %u\n", key, pdata->config_array[index].key_codes[key]);
@@ -5665,7 +5672,7 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 	}
 
 	data->input_dev = input_dev;
-	data->nav_button_enable = 1;
+	nav_button_enable = 1;
 
 	return 0;
 }
@@ -6275,10 +6282,7 @@ static ssize_t mxt_wakeup_mode_write_proc(struct file *file,
 
 static int mxt_nav_button_show_proc(struct seq_file *m, void *v)
 {
-	if (mx_data)
-		return seq_printf(m, "%d\n", (int)mx_data->nav_button_enable);
-	else
-		return -ENOMEM;
+	return seq_printf(m, "%u\n", nav_button_enable);
 }
 
 static int mxt_nav_button_open_proc(struct inode *inode, struct file *file)
@@ -6289,18 +6293,14 @@ static int mxt_nav_button_open_proc(struct inode *inode, struct file *file)
 static ssize_t mxt_nav_button_write_proc(struct file *file,
 			const char __user *buf, size_t count, loff_t *ppos)
 {
-	unsigned long val;
-	int error;
+	unsigned int val;
 
-	if (!mx_data)
-		return -ENOMEM;
+	if (sscanf(buf, "%u", &val) != 1)
+		return -EINVAL;
 
-	error = strict_strtoul(buf, 0, &val);
+	nav_button_enable = val > 0 ? 1 : 0;
 
-	if (!error)
-		mx_data->nav_button_enable = (u8)val;
-
-	return error ? : count;
+	return count;
 }
 
 static const struct file_operations mxt_wakeup_mode_proc_fops = {
@@ -6349,6 +6349,8 @@ static int mxt_remove_proc(void)
 	if (mxt_proc_parent) {
 		if (mxt_wakeup_mode_proc_entry)
 			remove_proc_entry("double_tap_enable", mxt_proc_parent);
+		if (mxt_nav_button_proc_entry)
+			remove_proc_entry("nav_button_enable", mxt_proc_parent);
 		remove_proc_entry("touchscreen", NULL);
 	}
 
