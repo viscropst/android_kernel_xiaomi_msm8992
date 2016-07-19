@@ -166,7 +166,7 @@ void hdd_ch_avoid_cb(void *hdd_context,void *indi_param);
 #define MEMORY_DEBUG_STR ""
 #endif
 
-#define DISABLE_KRAIT_IDLE_PS_VAL   200
+#define DISABLE_KRAIT_IDLE_PS_VAL   1
 #ifdef IPA_UC_OFFLOAD
 /* If IPA UC data path is enabled, target should reserve extra tx descriptors
  * for IPA WDI data path.
@@ -2919,7 +2919,7 @@ static int hdd_set_rx_filter(hdd_adapter_t *adapter, bool action,
 			uint8_t pattern)
 {
 	int ret;
-	uint8_t i;
+	uint8_t i, j;
 	tHalHandle handle;
 	tSirRcvFltMcAddrList *filter;
 	hdd_context_t* hdd_ctx = WLAN_HDD_GET_CTX(adapter);
@@ -2958,19 +2958,20 @@ static int hdd_set_rx_filter(hdd_adapter_t *adapter, bool action,
 		}
 		vos_mem_zero(filter, sizeof(*filter));
 		filter->action = action;
-		for (i = 0; i < adapter->mc_addr_list.mc_cnt; i++) {
+		for (i = 0, j = 0; i < adapter->mc_addr_list.mc_cnt; i++) {
 			if (!memcmp(adapter->mc_addr_list.addr[i],
 				&pattern, 1)) {
-				memcpy(filter->multicastAddr[i],
+				memcpy(filter->multicastAddr[j],
 					adapter->mc_addr_list.addr[i],
 					sizeof(adapter->mc_addr_list.addr[i]));
-				filter->ulMulticastAddrCnt++;
 				hddLog(LOGE, "%s RX filter : addr ="
 				    MAC_ADDRESS_STR,
 				    action ? "setting" : "clearing",
-				    MAC_ADDR_ARRAY(filter->multicastAddr[i]));
+				    MAC_ADDR_ARRAY(filter->multicastAddr[j]));
+				j++;
 			}
 		}
+		filter->ulMulticastAddrCnt = j;
 		/* Set rx filter */
 		sme_8023MulticastList(handle, adapter->sessionId, filter);
 		vos_mem_free(filter);
@@ -7482,6 +7483,87 @@ void hdd_set_station_ops( struct net_device *pWlanDev )
       pWlanDev->netdev_ops = &wlan_drv_ops;
 }
 
+#ifdef FEATURE_RUNTIME_PM
+/**
+ * hdd_runtime_suspend_init() - API to initialize runtime pm context
+ * @hdd_ctx: HDD Context
+ *
+ * The API initializes the context to prevent runtime pm for various use
+ * cases like scan, roc, dfs.
+ * This API can be extended to initialize the context to prevent runtime pm
+ *
+ * Return: void
+ */
+void hdd_runtime_suspend_init(hdd_context_t *hdd_ctx)
+{
+	struct hdd_runtime_pm_context *context = &hdd_ctx->runtime_context;
+
+	context->scan = vos_runtime_pm_prevent_suspend_init("scan");
+	context->roc = vos_runtime_pm_prevent_suspend_init("roc");
+	context->dfs = vos_runtime_pm_prevent_suspend_init("dfs");
+}
+
+/**
+ * hdd_runtime_suspend_deinit() - API to deinit runtime pm context
+ * @hdd_ctx: HDD context
+ *
+ * The API deinit the context to prevent runtime pm.
+ *
+ * Return: void
+ */
+void hdd_runtime_suspend_deinit(hdd_context_t *hdd_ctx)
+{
+	struct hdd_runtime_pm_context *context = &hdd_ctx->runtime_context;
+
+	vos_runtime_pm_prevent_suspend_deinit(context->scan);
+	context->scan = NULL;
+	vos_runtime_pm_prevent_suspend_deinit(context->roc);
+	context->roc = NULL;
+	vos_runtime_pm_prevent_suspend_deinit(context->dfs);
+	context->dfs = NULL;
+}
+
+/**
+ * hdd_adapter_runtime_suspend_init() - API to init runtime pm context/adapter
+ * @adapter: Interface Adapter
+ *
+ * API is used to init the context to prevent runtime pm/adapter
+ *
+ * Return: void
+ */
+static void
+hdd_adapter_runtime_suspend_init(hdd_adapter_t *adapter)
+{
+	struct hdd_adapter_pm_context *context = &adapter->runtime_context;
+
+	context->connect = vos_runtime_pm_prevent_suspend_init("connect");
+}
+
+/**
+ * hdd_adapter_runtime_suspend_denit() - API to deinit runtime pm/adapter
+ * @adapter: Interface Adapter
+ *
+ * API is used to deinit the context to prevent runtime pm/adapter
+ *
+ * Return: void
+ */
+static void hdd_adapter_runtime_suspend_denit(hdd_adapter_t *adapter)
+{
+	struct hdd_adapter_pm_context *context = &adapter->runtime_context;
+
+	vos_runtime_pm_prevent_suspend_deinit(context->connect);
+	context->connect = NULL;
+}
+
+#else
+void hdd_runtime_suspend_init(hdd_context_t *hdd_ctx) { }
+void hdd_runtime_suspend_deinit(hdd_context_t *hdd_ctx) { }
+static inline void
+hdd_adapter_runtime_suspend_init(hdd_adapter_t *adapter) { }
+static inline void
+hdd_adapter_runtime_suspend_denit(hdd_adapter_t *adapter) { }
+#endif
+
 static hdd_adapter_t* hdd_alloc_station_adapter( hdd_context_t *pHddCtx, tSirMacAddr macAddr, const char* name )
 {
    struct net_device *pWlanDev = NULL;
@@ -7555,11 +7637,13 @@ static hdd_adapter_t* hdd_alloc_station_adapter( hdd_context_t *pHddCtx, tSirMac
 
       pWlanDev->destructor = free_netdev;
       pWlanDev->ieee80211_ptr = &pAdapter->wdev ;
+      pWlanDev->tx_queue_len = HDD_NETDEV_TX_QUEUE_LEN;
       pAdapter->wdev.wiphy = pHddCtx->wiphy;
       pAdapter->wdev.netdev =  pWlanDev;
       /* set pWlanDev's parent to underlying device */
       SET_NETDEV_DEV(pWlanDev, pHddCtx->parent_dev);
       hdd_wmm_init( pAdapter );
+      hdd_adapter_runtime_suspend_init(pAdapter);
    }
 
    return pAdapter;
@@ -7906,6 +7990,7 @@ void hdd_cleanup_adapter(hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter,
       return;
    }
 
+    hdd_adapter_runtime_suspend_denit(pAdapter);
    /* The adapter is marked as closed. When hdd_wlan_exit() call returns,
     * the driver is almost closed and cannot handle either control
     * messages or data. However, unregister_netdevice() call above will
@@ -9052,10 +9137,12 @@ void hdd_connect_result(struct net_device *dev,
 			u16 status,
 			gfp_t gfp)
 {
+	hdd_adapter_t *padapter = (hdd_adapter_t *) netdev_priv(dev);
 
 	cfg80211_connect_result(dev, bssid, req_ie, req_ie_len,
 				resp_ie, resp_ie_len, status, gfp);
-	vos_runtime_pm_allow_suspend();
+
+	vos_runtime_pm_allow_suspend(padapter->runtime_context.connect);
 }
 
 
@@ -10385,6 +10472,7 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
 #endif /* WLAN_KD_READY_NOTIFIER */
 
 
+   hdd_runtime_suspend_deinit(pHddCtx);
    hdd_close_all_adapters( pHddCtx );
 
 #ifdef IPA_OFFLOAD
@@ -10838,14 +10926,15 @@ static VOS_STATUS wlan_hdd_reg_init(hdd_context_t *hdd_ctx)
 
 #ifdef MSM_PLATFORM
 void hdd_cnss_request_bus_bandwidth(hdd_context_t *pHddCtx,
-        uint64_t tx_packets, uint64_t rx_packets)
+        const uint64_t tx_packets, const uint64_t rx_packets)
 {
 #ifdef CONFIG_CNSS
     uint64_t total = tx_packets + rx_packets;
+    uint64_t temp_rx = 0;
+    uint64_t temp_tx = 0;
     enum cnss_bus_width_type next_vote_level = CNSS_BUS_WIDTH_NONE;
-
-    uint64_t temp_rx = (rx_packets + pHddCtx->prev_rx)/2;
-    enum cnss_bus_width_type next_rx_level = CNSS_BUS_WIDTH_NONE;
+    enum wlan_tp_level next_rx_level = WLAN_SVC_TP_NONE;
+    enum wlan_tp_level next_tx_level = WLAN_SVC_TP_NONE;
 
 
     if (total > pHddCtx->cfg_ini->busBandwidthHighThreshold)
@@ -10871,11 +10960,13 @@ void hdd_cnss_request_bus_bandwidth(hdd_context_t *pHddCtx,
         }
     }
 
+    /* fine-tuning parameters for RX Flows */
+    temp_rx = (rx_packets + pHddCtx->prev_rx) / 2;
     pHddCtx->prev_rx = rx_packets;
     if (temp_rx > pHddCtx->cfg_ini->tcpDelackThresholdHigh)
-        next_rx_level = CNSS_BUS_WIDTH_HIGH;
+        next_rx_level = WLAN_SVC_TP_HIGH;
     else
-        next_rx_level = CNSS_BUS_WIDTH_LOW;
+        next_rx_level = WLAN_SVC_TP_LOW;
 
     if (pHddCtx->cur_rx_level != next_rx_level) {
         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_DEBUG,
@@ -10885,6 +10976,24 @@ void hdd_cnss_request_bus_bandwidth(hdd_context_t *pHddCtx,
         wlan_hdd_send_svc_nlink_msg(WLAN_SVC_WLAN_TP_IND,
                                     &next_rx_level,
                                     sizeof(next_rx_level));
+    }
+
+    /* fine-tuning parameters for TX Flows */
+    temp_tx = (tx_packets + pHddCtx->prev_tx) / 2;
+    pHddCtx->prev_tx = tx_packets;
+    if (temp_tx > pHddCtx->cfg_ini->tcp_tx_high_tput_thres)
+        next_tx_level = WLAN_SVC_TP_HIGH;
+    else
+        next_tx_level = WLAN_SVC_TP_LOW;
+
+    if (pHddCtx->cur_tx_level != next_tx_level) {
+        hddLog(VOS_TRACE_LEVEL_DEBUG,
+               "%s: change TCP TX trigger level %d, average_tx: %llu ",
+               __func__, next_tx_level, temp_tx);
+        pHddCtx->cur_tx_level = next_tx_level;
+        wlan_hdd_send_svc_nlink_msg(WLAN_SVC_WLAN_TP_TX_IND,
+                                    &next_tx_level,
+                                    sizeof(next_tx_level));
     }
 #endif
 }
@@ -11704,7 +11813,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
 
    mutex_init(&pHddCtx->sap_lock);
 
-   pHddCtx->wifi_turn_on_time_since_boot = vos_get_monotonic_boottime();
+   pHddCtx->isLoadInProgress = FALSE;
 
 #ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
    /* Initialize the wake lcok */
@@ -11865,6 +11974,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    else
       hddLog(LOGE, FL("Registered IPv4 notifier"));
 
+   hdd_runtime_suspend_init(pHddCtx);
    pHddCtx->isLoadInProgress = FALSE;
    vos_set_load_unload_in_progress(VOS_MODULE_ID_VOSS, FALSE);
    complete(&wlan_start_comp);
@@ -13379,6 +13489,7 @@ void wlan_hdd_send_svc_nlink_msg(int type, void *data, int len)
     case WLAN_SVC_DFS_RADAR_DETECT_IND:
     case WLAN_SVC_DFS_ALL_CHANNEL_UNAVAIL_IND:
     case WLAN_SVC_WLAN_TP_IND:
+    case WLAN_SVC_WLAN_TP_TX_IND:
     case WLAN_SVC_RPS_ENABLE_IND:
         ani_hdr->length = len;
         nlh->nlmsg_len = NLMSG_LENGTH((sizeof(tAniMsgHdr) + len));

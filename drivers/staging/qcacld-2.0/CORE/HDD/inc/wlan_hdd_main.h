@@ -77,6 +77,10 @@
  *  when HDD queue becomes full. This Low watermark is used to enable
  *  the Net Device queue again */
 #define HDD_TX_QUEUE_LOW_WATER_MARK (HDD_TX_QUEUE_MAX_LEN*3/4)
+
+/** Length of the TX queue for the netdev */
+#define HDD_NETDEV_TX_QUEUE_LEN (3000)
+
 /** Bytes to reserve in the headroom */
 #define LIBRA_HW_NEEDED_HEADROOM   128
 /** Hdd Tx Time out value */
@@ -799,6 +803,30 @@ typedef struct multicast_addr_list
 
 #define WLAN_HDD_ADAPTER_MAGIC 0x574c414e //ASCII "WLAN"
 
+/**
+ * struct hdd_runtime_pm_context - context to prevent/allow runtime pm
+ * @scan: scan context to prevent/allow runtime pm
+ * @roc : remain on channel runtime pm context
+ * @dfs : Dynamic frequency selection runtime pm context
+ *
+ * Prevent Runtime PM for scan, roc and dfs.
+ */
+struct hdd_runtime_pm_context {
+	void *scan;
+	void *roc;
+	void *dfs;
+};
+
+/**
+ * struct hdd_adapter_pm_context - Context/Adapter to prevent/allow runtime pm
+ * @connect : Connect context per adapter
+ *
+ * Structure to hold runtime pm contexts for each adapter
+ */
+struct hdd_adapter_pm_context {
+	void *connect;
+};
+
 struct hdd_adapter_s
 {
    /* Magic cookie for adapter sanity verification.  Note that this
@@ -998,6 +1026,7 @@ struct hdd_adapter_s
     /* Time stamp for last completed RoC request */
     v_TIME_t lastRocTs;
 
+	struct hdd_adapter_pm_context runtime_context;
 };
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(pAdapter) (&(pAdapter)->sessionCtx.station)
@@ -1383,6 +1412,8 @@ struct hdd_context_s
     spinlock_t     bus_bw_lock;
     int            cur_rx_level;
     uint64_t       prev_rx;
+    int            cur_tx_level;
+    uint64_t       prev_tx;
 #endif
 
     v_U8_t         issplitscan_enabled;
@@ -1444,8 +1475,8 @@ struct hdd_context_s
     struct completion ready_to_extwow;
 #endif
 
-    /* Time since boot up to WiFi turn ON (in micro seconds) */
-    v_U64_t wifi_turn_on_time_since_boot;
+    /* Time since boot up to extscan start (in micro seconds) */
+    v_U64_t ext_scan_start_since_boot;
 
     /* RoC request queue and work */
     struct delayed_work rocReqWork;
@@ -1483,6 +1514,8 @@ struct hdd_context_s
 #endif
     /* IPv4 notifier callback for handling ARP offload on change in IP */
     struct notifier_block ipv4_notifier;
+    
+    struct hdd_runtime_pm_context runtime_context;
 };
 
 /*---------------------------------------------------------------------------
@@ -1704,4 +1737,6 @@ void hdd_connect_result(struct net_device *dev, const u8 *bssid,
 			const u8 * resp_ie, size_t resp_ie_len,
 			u16 status, gfp_t gfp);
 
+void hdd_runtime_suspend_init(hdd_context_t *);
+void hdd_runtime_suspend_deinit(hdd_context_t *);
 #endif    // end #if !defined( WLAN_HDD_MAIN_H )

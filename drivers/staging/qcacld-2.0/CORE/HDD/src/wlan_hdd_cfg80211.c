@@ -3087,10 +3087,6 @@ static int __wlan_hdd_cfg80211_extscan_get_valid_channels(struct wiphy *wiphy,
        return -EINVAL;
     }
 
-    if (!pHddCtx->cfg_ini->extscan_enabled) {
-        hddLog(LOGE, FL("extscan not supported"));
-        return -ENOTSUPP;
-    }
     if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
                   data, data_len,
                   wlan_hdd_extscan_config_policy)) {
@@ -3863,6 +3859,10 @@ static int __wlan_hdd_cfg80211_extscan_start(struct wiphy *wiphy,
 			FL("sme_ExtScanStart failed(err=%d)"), status);
 		goto fail;
 	}
+
+	pHddCtx->ext_scan_start_since_boot = vos_get_monotonic_boottime();
+	hddLog(LOG1, FL("Timestamp since boot: %llu"),
+			pHddCtx->ext_scan_start_since_boot);
 
 	/* request was sent -- wait for the response */
 	rc = wait_for_completion_timeout(&context->response_event,
@@ -13102,11 +13102,23 @@ static eHalStatus hdd_cfg80211_scan_done_callback(tHalHandle halHandle,
     hdd_adapter_t *pAdapter = WLAN_HDD_GET_PRIV_PTR( dev );
     hdd_scaninfo_t *pScanInfo = &pAdapter->scan_info;
     struct cfg80211_scan_request *req = NULL;
+	hdd_context_t *pHddCtx = NULL;
     bool aborted = false;
     unsigned long rc;
     int ret = 0;
 
     ENTER();
+
+	if (!pAdapter || pAdapter->magic != WLAN_HDD_ADAPTER_MAGIC) {
+		hddLog(LOGE, FL("pAdapter is not valid!"));
+		return eHAL_STATUS_FAILURE;
+	}
+
+	pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+	if (!pHddCtx) {
+		hddLog(LOGE, FL("HDD context is not valid!"));
+		return eHAL_STATUS_FAILURE;
+	}
 
     hddLog(VOS_TRACE_LEVEL_INFO,
             "%s called with halHandle = %p, pContext = %p,"
@@ -13205,6 +13217,8 @@ static eHalStatus hdd_cfg80211_scan_done_callback(tHalHandle halHandle,
     complete(&pScanInfo->abortscan_event_var);
 
 allow_suspend:
+
+    vos_runtime_pm_allow_suspend(pHddCtx->runtime_context.scan);
     /* release the wake lock at the end of the scan*/
     hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_SCAN);
     /* Acquire wakelock to handle the case where APP's tries to suspend
@@ -13716,7 +13730,13 @@ int __wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
            scanRequest.requestType, scanRequest.scanType,
            scanRequest.minChnTime, scanRequest.maxChnTime,
            scanRequest.p2pSearch, scanRequest.skipDfsChnlInP2pSearch);
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3,7,0))
+    if (request->flags & NL80211_SCAN_FLAG_FLUSH)
+        sme_ScanFlushResult(WLAN_HDD_GET_HAL_CTX(pAdapter),
+                pAdapter->sessionId);
+#endif
 
+    vos_runtime_pm_prevent_suspend(pHddCtx->runtime_context.scan);
     status = sme_ScanRequest( WLAN_HDD_GET_HAL_CTX(pAdapter),
                               pAdapter->sessionId, &scanRequest, &scanId,
                               &hdd_cfg80211_scan_done_callback, dev );
@@ -13737,6 +13757,7 @@ int __wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
            status = -EIO;
         }
 
+        vos_runtime_pm_allow_suspend(pHddCtx->runtime_context.scan);
         hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_SCAN);
         goto free_mem;
     }
@@ -14033,7 +14054,7 @@ int wlan_hdd_cfg80211_connect_start( hdd_adapter_t  *pAdapter,
             pRoamProfile->nAddIEScanLength = pAdapter->scan_info.scanAddIE.length;
         }
 
-        vos_runtime_pm_prevent_suspend();
+        vos_runtime_pm_prevent_suspend(pAdapter->runtime_context.connect);
 
         status = sme_RoamConnect( WLAN_HDD_GET_HAL_CTX(pAdapter),
                             pAdapter->sessionId, pRoamProfile, &roamId);
@@ -14048,6 +14069,7 @@ int wlan_hdd_cfg80211_connect_start( hdd_adapter_t  *pAdapter,
             /* change back to NotAssociated */
             hdd_connSetConnectionState(pAdapter,
                                        eConnectionState_NotConnected);
+            vos_runtime_pm_allow_suspend(pAdapter->runtime_context.connect);
         }
 
         pRoamProfile->ChannelInfo.ChannelList = NULL;
@@ -16331,7 +16353,7 @@ static int __wlan_hdd_cfg80211_set_power_mgmt(struct wiphy *wiphy,
     {
         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_DEBUG,
                   "%s: DHCP start indicated through power save", __func__);
-        vos_runtime_pm_prevent_suspend();
+        vos_runtime_pm_prevent_suspend(pAdapter->runtime_context.connect);
         sme_DHCPStartInd(pHddCtx->hHal, pAdapter->device_mode,
                          pAdapter->macAddressCurrent.bytes, pAdapter->sessionId);
     }
@@ -16339,7 +16361,7 @@ static int __wlan_hdd_cfg80211_set_power_mgmt(struct wiphy *wiphy,
     {
         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_DEBUG,
                   "%s: DHCP stop indicated through power save", __func__);
-        vos_runtime_pm_allow_suspend();
+        vos_runtime_pm_allow_suspend(pAdapter->runtime_context.connect);
         sme_DHCPStopInd(pHddCtx->hHal, pAdapter->device_mode,
                         pAdapter->macAddressCurrent.bytes, pAdapter->sessionId);
     }
@@ -19206,13 +19228,13 @@ wlan_hdd_cfg80211_extscan_cached_results_ind(void *ctx,
 		ap = &result->ap[0];
 		for (j = 0; j < result->num_results; j++) {
 			/*
-			 * Firmware returns timestamp from WiFi turn ON till
-			 * BSSID was cached (in seconds). Add this with
-			 * time gap between system boot up to WiFi turn ON
+			 * Firmware returns timestamp from ext scan start till
+			 * BSSID was cached (in micro seconds). Add this with
+			 * time gap between system boot up to ext scan start
 			 * to derive the time since boot when the
 			 * BSSID was cached.
 			 */
-			ap->ts += pHddCtx->wifi_turn_on_time_since_boot;
+			ap->ts += pHddCtx->ext_scan_start_since_boot;
 			hddLog(LOG1, "Timestamp %llu "
 				"Ssid: %s "
 				"Bssid (" MAC_ADDRESS_STR ") "
