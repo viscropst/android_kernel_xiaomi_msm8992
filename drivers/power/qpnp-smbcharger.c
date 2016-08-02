@@ -5054,14 +5054,11 @@ static int smbchg_hw_init(struct smbchg_chip *chip)
 #endif
 
 	/*
-	 * Do not force using current from the register i.e. use auto
-	 * power source detect (APSD) mA ratings for the initial current values.
-	 *
-	 * If this is set, AICL will not rerun at 9V for HVDCPs
+	 * force using current from the register i.e. ignore auto
+	 * power source detect (APSD) mA ratings
 	 */
 	rc = smbchg_masked_write(chip, chip->usb_chgpth_base + CMD_IL,
-			USE_REGISTER_FOR_CURRENT, 0);
-
+			USE_REGISTER_FOR_CURRENT, USE_REGISTER_FOR_CURRENT);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't set input limit cmd rc=%d\n", rc);
 		return rc;
@@ -6106,7 +6103,7 @@ static int smbchg_probe(struct spmi_device *spmi)
 	int rc;
 	struct smbchg_chip *chip;
 	struct power_supply *usb_psy;
-	struct qpnp_vadc_chip *vadc_dev;
+	struct qpnp_vadc_chip *vadc_dev = NULL;
 
 	usb_psy = power_supply_get_by_name("usb");
 	if (!usb_psy) {

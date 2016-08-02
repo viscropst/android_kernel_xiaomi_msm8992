@@ -2787,7 +2787,7 @@ static ssize_t rgb_blink_store(struct device *dev,
 	const char *buf, size_t count)
 {
 	struct rgb_sync *rgb_sync;
-	struct qpnp_led_data *led;
+	struct qpnp_led_data *led = NULL;
 	unsigned long blinking;
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	ssize_t rc = -EINVAL, i;
@@ -4000,9 +4000,9 @@ err_config_gpio:
 
 static int qpnp_leds_probe(struct spmi_device *spmi)
 {
-	struct qpnp_led_data *led, *led_array;
-	struct resource *led_resource;
-	struct device_node *node, *temp;
+	struct qpnp_led_data *led = NULL, *led_array = NULL;
+	struct resource *led_resource = NULL;
+	struct device_node *node = NULL, *temp = NULL;
 	int rc, i, num_leds = 0, parsed_leds = 0;
 	const char *led_label;
 	bool regulator_probe = false;

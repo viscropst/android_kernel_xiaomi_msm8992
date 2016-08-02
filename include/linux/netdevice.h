@@ -1795,6 +1795,7 @@ struct softnet_data {
 	struct Qdisc		*output_queue;
 	struct Qdisc		**output_queue_tailp;
 	struct list_head	poll_list;
+	struct napi_struct	*current_napi;
 	struct sk_buff		*completion_queue;
 	struct sk_buff_head	process_queue;
 
@@ -1803,6 +1804,7 @@ struct softnet_data {
 	unsigned int		time_squeeze;
 	unsigned int		cpu_collision;
 	unsigned int		received_rps;
+	unsigned int		gro_coalesced;
 
 #ifdef CONFIG_RPS
 	struct softnet_data	*rps_ipi_list;
@@ -2216,6 +2218,7 @@ extern gro_result_t	napi_gro_receive(struct napi_struct *napi,
 extern void		napi_gro_flush(struct napi_struct *napi, bool flush_old);
 extern struct sk_buff *	napi_get_frags(struct napi_struct *napi);
 extern gro_result_t	napi_gro_frags(struct napi_struct *napi);
+extern struct napi_struct *get_current_napi_context(void);
 
 static inline void napi_free_frags(struct napi_struct *napi)
 {

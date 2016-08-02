@@ -20,7 +20,7 @@
 #include <linux/slab.h>
 #include <linux/iopoll.h>
 #include <linux/kthread.h>
-
+#include <linux/time.h>
 #include <linux/msm_iommu_domains.h>
 
 #include "mdss.h"
@@ -1345,6 +1345,7 @@ static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	struct dsi_cmd_desc *cm;
 	struct dsi_ctrl_hdr *dchdr;
 	int len, wait, tot = 0;
+	struct timespec now_ts;
 
 	tp = &ctrl->tx_buf;
 	mdss_dsi_buf_init(tp);
@@ -1365,6 +1366,13 @@ static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 
 			wait = mdss_dsi_wait4video_eng_busy(ctrl);
 
+			get_monotonic_boottime(&now_ts);
+			if (timespec_compare(&ctrl->wait_until_ts, &now_ts) > 0) {
+				const struct timespec diff_ts =
+					timespec_sub(ctrl->wait_until_ts, now_ts);
+				usleep(timespec_to_ns(&diff_ts) / NSEC_PER_USEC);
+			}
+
 			mdss_dsi_enable_irq(ctrl, DSI_CMD_TERM);
 			if (use_dma_tpg)
 				len = mdss_dsi_cmd_dma_tpg_tx(ctrl, tp);
@@ -1379,8 +1387,11 @@ static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 			pr_debug("%s: cmd_dma_tx for cmd = 0x%x, len = %d\n",
 					__func__,  cm->payload[0], len);
 
-			if (!wait || dchdr->wait > VSYNC_PERIOD)
-				usleep(dchdr->wait * 1000);
+			if (!wait || dchdr->wait > VSYNC_PERIOD) {
+				get_monotonic_boottime(&ctrl->wait_until_ts);
+				timespec_add_ns(&ctrl->wait_until_ts,
+						dchdr->wait * NSEC_PER_MSEC);
+			}
 
 			mdss_dsi_buf_init(tp);
 			len = 0;
@@ -2352,7 +2363,7 @@ static int dsi_event_thread(void *data)
 		if (todo & DSI_EV_PLL_UNLOCKED)
 			mdss_dsi_pll_relock(ctrl);
 
-		if (todo & DSI_EV_MDP_FIFO_UNDERFLOW) {
+		if (todo & DSI_EV_DLNx_FIFO_UNDERFLOW) {
 			mutex_lock(&ctrl->mutex);
 			if (ctrl->recovery) {
 				pr_debug("%s: Handling underflow event\n",
@@ -2510,7 +2521,7 @@ void mdss_dsi_fifo_status(struct mdss_dsi_ctrl_pdata *ctrl)
 	status = MIPI_INP(base + 0x000c);/* DSI_FIFO_STATUS */
 
 	/* fifo underflow, overflow and empty*/
-	if (status & 0xcccc4489) {
+	if (status & 0xcccc4409) {
 		MIPI_OUTP(base + 0x000c, status);
 
 		/*
@@ -2527,8 +2538,8 @@ void mdss_dsi_fifo_status(struct mdss_dsi_ctrl_pdata *ctrl)
 			/* Ignore FIFO EMPTY when overflow happens */
 			status = status & 0xeeeeffff;
 		}
-		if (status & 0x0080)  /* CMD_DMA_FIFO_UNDERFLOW */
-			dsi_send_events(ctrl, DSI_EV_MDP_FIFO_UNDERFLOW, 0);
+		if (status & 0x88880000)  /* DLNx_HS_FIFO_UNDERFLOW */
+			dsi_send_events(ctrl, DSI_EV_DLNx_FIFO_UNDERFLOW, 0);
 		if (status & 0x11110000) /* DLN_FIFO_EMPTY */
 			dsi_send_events(ctrl, DSI_EV_DSI_FIFO_EMPTY, 0);
 	}

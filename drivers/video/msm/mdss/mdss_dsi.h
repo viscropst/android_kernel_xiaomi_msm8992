@@ -120,6 +120,7 @@ enum dsi_lane_map_type {
 enum dsi_pm_type {
 	DSI_CORE_PM,
 	DSI_CTRL_PM,
+	DSI_PHY_PM,
 	DSI_PANEL_PM,
 	DSI_MAX_PM
 };
@@ -301,7 +302,7 @@ enum {
 #define DSI_ALL_CLKS	((DSI_BUS_CLKS) | (DSI_LINK_CLKS))
 
 #define DSI_EV_PLL_UNLOCKED		0x0001
-#define DSI_EV_MDP_FIFO_UNDERFLOW	0x0002
+#define DSI_EV_DLNx_FIFO_UNDERFLOW	0x0002
 #define DSI_EV_DSI_FIFO_EMPTY		0x0004
 #define DSI_EV_DLNx_FIFO_OVERFLOW	0x0008
 #define DSI_EV_LP_RX_TIMEOUT		0x0010
@@ -431,6 +432,8 @@ struct mdss_dsi_ctrl_pdata {
 	struct mdss_util_intf *mdss_util;
 
 	bool dfps_status;	/* dynamic refresh status */
+
+	struct timespec wait_until_ts;
 };
 
 struct dsi_status_data {
@@ -524,6 +527,7 @@ static inline const char *__mdss_dsi_pm_name(enum dsi_pm_type module)
 	switch (module) {
 	case DSI_CORE_PM:	return "DSI_CORE_PM";
 	case DSI_CTRL_PM:	return "DSI_CTRL_PM";
+	case DSI_PHY_PM:	return "DSI_PHY_PM";
 	case DSI_PANEL_PM:	return "PANEL_PM";
 	default:		return "???";
 	}
@@ -535,6 +539,7 @@ static inline const char *__mdss_dsi_pm_supply_node_name(
 	switch (module) {
 	case DSI_CORE_PM:	return "qcom,core-supply-entries";
 	case DSI_CTRL_PM:	return "qcom,ctrl-supply-entries";
+	case DSI_PHY_PM:	return "qcom,phy-supply-entries";
 	case DSI_PANEL_PM:	return "qcom,panel-supply-entries";
 	default:		return "???";
 	}

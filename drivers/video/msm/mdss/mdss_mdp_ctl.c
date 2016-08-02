@@ -21,6 +21,7 @@
 #include <linux/sort.h>
 #include <linux/clk.h>
 #include <linux/bitmap.h>
+#include <linux/workqueue.h>
 
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
@@ -2502,9 +2503,31 @@ int mdss_mdp_ctl_destroy(struct mdss_mdp_ctl *ctl)
 	return 0;
 }
 
+struct intf_handler_info {
+	struct work_struct work;
+	struct completion cmd_done;
+	struct list_head item;
+	int (*event_handler) (struct mdss_panel_data *pdata, int e, void *arg);
+	struct mdss_panel_data *pdata;
+	int event;
+	void *arg;
+	int rc;
+};
+
+static void intf_handler_work(struct work_struct *work)
+{
+        struct intf_handler_info *info = container_of(work,
+                struct intf_handler_info, work);
+
+	info->rc = info->event_handler(info->pdata, info->event, info->arg);
+	complete(&info->cmd_done);
+}
+
 int mdss_mdp_ctl_intf_event(struct mdss_mdp_ctl *ctl, int event, void *arg)
 {
 	struct mdss_panel_data *pdata;
+	struct intf_handler_info *n, *info;
+	LIST_HEAD(handlers);
 	int rc = 0;
 
 	if (!ctl || !ctl->panel_data)
@@ -2515,10 +2538,29 @@ int mdss_mdp_ctl_intf_event(struct mdss_mdp_ctl *ctl, int event, void *arg)
 	pr_debug("sending ctl=%d event=%d\n", ctl->num, event);
 
 	do {
-		if (pdata->event_handler)
-			rc = pdata->event_handler(pdata, event, arg);
+		if (pdata->event_handler) {
+			info = kzalloc(sizeof(*info), GFP_KERNEL);
+			INIT_WORK(&info->work, intf_handler_work);
+			init_completion(&info->cmd_done);
+
+			info->event_handler = pdata->event_handler;
+			info->pdata = pdata;
+			info->event = event;
+			info->arg = arg;
+
+			list_add(&info->item, &handlers);
+
+			schedule_work(&info->work);
+		}
 		pdata = pdata->next;
-	} while (rc == 0 && pdata && pdata->active);
+	} while (pdata && pdata->active);
+
+	list_for_each_entry_safe(info, n, &handlers, item) {
+		wait_for_completion(&info->cmd_done);
+		if (!rc)
+			rc = info->rc;
+		kfree(info);
+	}
 
 	return rc;
 }
@@ -3449,7 +3491,7 @@ int mdss_mdp_mixer_pipe_unstage(struct mdss_mdp_pipe *pipe,
 		!(pipe->src_split_req && mixer->is_right_mixer);
 	index = (pipe->mixer_stage * MAX_PIPES_PER_STAGE) + right_blend_index;
 
-	if (pipe == mixer->stage_pipe[index]) {
+	if (index < MAX_PIPES_PER_LM && pipe == mixer->stage_pipe[index]) {
 		pr_debug("unstage p%d from %s side of stage=%d lm=%d ndx=%d\n",
 			pipe->num, pipe->is_right_blend ? "right" : "left",
 			pipe->mixer_stage, mixer->num, index);

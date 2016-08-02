@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -87,7 +87,8 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 static int q6asm_memory_unmap_regions(struct audio_client *ac, int dir);
 static void q6asm_reset_buf_state(struct audio_client *ac);
 
-static int q6asm_map_channels(u8 *channel_mapping, uint32_t channels);
+static int q6asm_map_channels(u8 *channel_mapping, uint32_t channels,
+				bool use_back_flavor);
 void *q6asm_mmap_apr_reg(void);
 
 static int q6asm_is_valid_session(struct apr_client_data *data, void *priv);
@@ -419,6 +420,7 @@ static void q6asm_session_free(struct audio_client *ac)
 {
 	struct list_head		*ptr, *next;
 	struct asm_no_wait_node		*node;
+	unsigned long			flags;
 
 	pr_debug("%s: sessionid[%d]\n", __func__, ac->session);
 	rtac_remove_popp_from_adm_devices(ac->session);
@@ -427,12 +429,13 @@ static void q6asm_session_free(struct audio_client *ac)
 	ac->perf_mode = LEGACY_PCM_MODE;
 	ac->fptr_cache_ops = NULL;
 
+	spin_lock_irqsave(&ac->no_wait_que_spinlock, flags);
 	list_for_each_safe(ptr, next, &ac->no_wait_que) {
 		node = list_entry(ptr, struct asm_no_wait_node, list);
 		list_del(&node->list);
 		kfree(node);
 	}
-	list_del(&ac->no_wait_que);
+	spin_unlock_irqrestore(&ac->no_wait_que_spinlock, flags);
 	return;
 }
 
@@ -1058,6 +1061,8 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 	ac->fptr_cache_ops = NULL;
 	/* DSP expects stream id from 1 */
 	ac->stream_id = 1;
+	INIT_LIST_HEAD(&ac->no_wait_que);
+	spin_lock_init(&ac->no_wait_que_spinlock);
 	ac->apr = apr_register("ADSP", "ASM", \
 			(apr_fn)q6asm_callback,\
 			((ac->session) << 8 | 0x0001),\
@@ -1103,8 +1108,6 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 	}
 	atomic_set(&ac->cmd_state, 0);
 	atomic_set(&ac->nowait_cmd_cnt, 0);
-	spin_lock_init(&ac->no_wait_que_spinlock);
-	INIT_LIST_HEAD(&ac->no_wait_que);
 	atomic_set(&ac->mem_state, 0);
 
 	rc = send_asm_custom_topology(ac);
@@ -2794,7 +2797,7 @@ int q6asm_set_encdec_chan_map(struct audio_client *ac,
 	channel_mapping = chan_map.channel_mapping;
 	memset(channel_mapping, PCM_CHANNEL_NULL, MAX_CHAN_MAP_CHANNELS);
 
-	if (q6asm_map_channels(channel_mapping, num_channels)) {
+	if (q6asm_map_channels(channel_mapping, num_channels, false)) {
 		pr_err("%s: map channels failed %d\n", __func__, num_channels);
 		return -EINVAL;
 	}
@@ -2826,7 +2829,8 @@ fail_cmd:
 }
 
 static int __q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
-		uint32_t rate, uint32_t channels, uint16_t bits_per_sample)
+		uint32_t rate, uint32_t channels, uint16_t bits_per_sample,
+		bool use_back_flavor)
 {
 	struct asm_multi_channel_pcm_enc_cfg_v2  enc_cfg;
 	u8 *channel_mapping;
@@ -2855,7 +2859,7 @@ static int __q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
 
 	memset(channel_mapping, 0, PCM_FORMAT_MAX_NUM_CHANNEL);
 
-	if (q6asm_map_channels(channel_mapping, channels)) {
+	if (q6asm_map_channels(channel_mapping, channels, use_back_flavor)) {
 		pr_err("%s: map channels failed %d", __func__, channels);
 		return -EINVAL;
 	}
@@ -2884,15 +2888,16 @@ fail_cmd:
 }
 
 int q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
-			uint32_t rate, uint32_t channels)
+			uint32_t rate, uint32_t channels, bool use_back_flavor)
 {
-	return __q6asm_enc_cfg_blk_pcm(ac, rate, channels, 16);
+	return __q6asm_enc_cfg_blk_pcm(ac, rate, channels, 16, use_back_flavor);
 }
 
 int q6asm_enc_cfg_blk_pcm_format_support(struct audio_client *ac,
 		uint32_t rate, uint32_t channels, uint16_t bits_per_sample)
 {
-	 return __q6asm_enc_cfg_blk_pcm(ac, rate, channels, bits_per_sample);
+	 return __q6asm_enc_cfg_blk_pcm(ac, rate, channels,
+			 bits_per_sample, false);
 }
 
 int q6asm_enc_cfg_blk_pcm_native(struct audio_client *ac,
@@ -2926,7 +2931,7 @@ int q6asm_enc_cfg_blk_pcm_native(struct audio_client *ac,
 
 	memset(channel_mapping, 0, PCM_FORMAT_MAX_NUM_CHANNEL);
 
-	if (q6asm_map_channels(channel_mapping, channels)) {
+	if (q6asm_map_channels(channel_mapping, channels, false)) {
 		pr_err("%s: map channels failed %d\n", __func__, channels);
 		return -EINVAL;
 	}
@@ -2954,7 +2959,8 @@ fail_cmd:
 	return -EINVAL;
 }
 
-static int q6asm_map_channels(u8 *channel_mapping, uint32_t channels)
+static int q6asm_map_channels(u8 *channel_mapping, uint32_t channels,
+		bool use_back_flavor)
 {
 	u8 *lchannel_mapping;
 	lchannel_mapping = channel_mapping;
@@ -2971,21 +2977,27 @@ static int q6asm_map_channels(u8 *channel_mapping, uint32_t channels)
 	} else if (channels == 4) {
 		lchannel_mapping[0] = PCM_CHANNEL_FL;
 		lchannel_mapping[1] = PCM_CHANNEL_FR;
-		lchannel_mapping[2] = PCM_CHANNEL_LS;
-		lchannel_mapping[3] = PCM_CHANNEL_RS;
+		lchannel_mapping[2] = use_back_flavor ?
+			PCM_CHANNEL_LB : PCM_CHANNEL_LS;
+		lchannel_mapping[3] = use_back_flavor ?
+			PCM_CHANNEL_RB : PCM_CHANNEL_RS;
 	} else if (channels == 5) {
 		lchannel_mapping[0] = PCM_CHANNEL_FL;
 		lchannel_mapping[1] = PCM_CHANNEL_FR;
 		lchannel_mapping[2] = PCM_CHANNEL_FC;
-		lchannel_mapping[3] = PCM_CHANNEL_LS;
-		lchannel_mapping[4] = PCM_CHANNEL_RS;
+		lchannel_mapping[3] = use_back_flavor ?
+			PCM_CHANNEL_LB : PCM_CHANNEL_LS;
+		lchannel_mapping[4] = use_back_flavor ?
+			PCM_CHANNEL_RB : PCM_CHANNEL_RS;
 	} else if (channels == 6) {
 		lchannel_mapping[0] = PCM_CHANNEL_FL;
 		lchannel_mapping[1] = PCM_CHANNEL_FR;
 		lchannel_mapping[2] = PCM_CHANNEL_FC;
 		lchannel_mapping[3] = PCM_CHANNEL_LFE;
-		lchannel_mapping[4] = PCM_CHANNEL_LS;
-		lchannel_mapping[5] = PCM_CHANNEL_RS;
+		lchannel_mapping[4] = use_back_flavor ?
+			PCM_CHANNEL_LB : PCM_CHANNEL_LS;
+		lchannel_mapping[5] = use_back_flavor ?
+			PCM_CHANNEL_RB : PCM_CHANNEL_RS;
 	} else if (channels == 8) {
 		lchannel_mapping[0] = PCM_CHANNEL_FL;
 		lchannel_mapping[1] = PCM_CHANNEL_FR;
@@ -3363,7 +3375,7 @@ static int __q6asm_media_format_block_pcm(struct audio_client *ac,
 	memset(channel_mapping, 0, PCM_FORMAT_MAX_NUM_CHANNEL);
 
 	if (use_default_chmap) {
-		if (q6asm_map_channels(channel_mapping, channels)) {
+		if (q6asm_map_channels(channel_mapping, channels, false)) {
 			pr_err("%s: map channels failed %d\n",
 				__func__, channels);
 			return -EINVAL;
@@ -3454,7 +3466,7 @@ static int __q6asm_media_format_block_multi_ch_pcm(struct audio_client *ac,
 	memset(channel_mapping, 0, PCM_FORMAT_MAX_NUM_CHANNEL);
 
 	if (use_default_chmap) {
-		if (q6asm_map_channels(channel_mapping, channels)) {
+		if (q6asm_map_channels(channel_mapping, channels, false)) {
 			pr_err("%s: map channels failed %d\n",
 				__func__, channels);
 			return -EINVAL;
@@ -3582,7 +3594,7 @@ int q6asm_stream_media_format_block_aac(struct audio_client *ac,
 }
 
 int q6asm_media_format_block_wma(struct audio_client *ac,
-				void *cfg)
+				void *cfg, int stream_id)
 {
 	struct asm_wmastdv9_fmt_blk_v2 fmt;
 	struct asm_wma_cfg *wma_cfg = (struct asm_wma_cfg *)cfg;
@@ -3594,7 +3606,7 @@ int q6asm_media_format_block_wma(struct audio_client *ac,
 		wma_cfg->block_align, wma_cfg->valid_bits_per_sample,
 		wma_cfg->ch_mask, wma_cfg->encode_opt);
 
-	q6asm_add_hdr(ac, &fmt.hdr, sizeof(fmt), TRUE);
+	q6asm_stream_add_hdr(ac, &fmt.hdr, sizeof(fmt), TRUE, stream_id);
 	atomic_set(&ac->cmd_state, 1);
 
 	fmt.hdr.opcode = ASM_DATA_CMD_MEDIA_FMT_UPDATE_V2;
@@ -3632,7 +3644,7 @@ fail_cmd:
 }
 
 int q6asm_media_format_block_wmapro(struct audio_client *ac,
-				void *cfg)
+				void *cfg, int stream_id)
 {
 	struct asm_wmaprov10_fmt_blk_v2 fmt;
 	struct asm_wmapro_cfg *wmapro_cfg = (struct asm_wmapro_cfg *)cfg;
@@ -3646,7 +3658,7 @@ int q6asm_media_format_block_wmapro(struct audio_client *ac,
 		wmapro_cfg->ch_mask, wmapro_cfg->encode_opt,
 		wmapro_cfg->adv_encode_opt, wmapro_cfg->adv_encode_opt2);
 
-	q6asm_add_hdr(ac, &fmt.hdr, sizeof(fmt), TRUE);
+	q6asm_stream_add_hdr(ac, &fmt.hdr, sizeof(fmt), TRUE, stream_id);
 	atomic_set(&ac->cmd_state, 1);
 
 	fmt.hdr.opcode = ASM_DATA_CMD_MEDIA_FMT_UPDATE_V2;
@@ -4151,7 +4163,7 @@ static int q6asm_memory_unmap_regions(struct audio_client *ac, int dir)
 	struct audio_port_data *port = NULL;
 	struct asm_buffer_node *buf_node = NULL;
 	struct list_head *ptr, *next;
-	uint32_t buf_add;
+	phys_addr_t buf_add;
 	int	rc = 0;
 	int	cmd_size = 0;
 
@@ -4170,7 +4182,7 @@ static int q6asm_memory_unmap_regions(struct audio_client *ac, int dir)
 			TRUE, ((ac->session << 8) | dir));
 	atomic_set(&ac->mem_state, 1);
 	port = &ac->port[dir];
-	buf_add = (uint32_t)port->buf->phys;
+	buf_add = port->buf->phys;
 	mem_unmap.hdr.opcode = ASM_CMD_SHARED_MEM_UNMAP_REGIONS;
 	mem_unmap.mem_map_handle = 0;
 	list_for_each_safe(ptr, next, &ac->port[dir].mem_map_handle) {

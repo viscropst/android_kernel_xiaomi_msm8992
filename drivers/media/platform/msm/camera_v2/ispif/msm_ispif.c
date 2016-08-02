@@ -1139,7 +1139,9 @@ static int msm_ispif_set_vfe_info(struct ispif_device *ispif,
 			(vfe_info ? vfe_info->num_vfe:0));
 		return -EINVAL;
 	}
+
 	memcpy(&ispif->vfe_info, vfe_info, sizeof(struct msm_ispif_vfe_info));
+
 	return 0;
 }
 
