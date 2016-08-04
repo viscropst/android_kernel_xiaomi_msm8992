@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -408,164 +408,11 @@ static int msm_eeprom_get_cmm_data(struct msm_eeprom_ctrl_t *e_ctrl,
 	return rc;
 }
 
-/**
-  * read_eeprom_memory() - read map data into buffer
-  * @e_ctrl:	eeprom control struct
-  * @block:	block to be read
-  *
-  * This function iterates through blocks stored in block->map, reads each
-  * region and concatenate them into the pre-allocated block->mapdata
-  */
-static int read_eeprom_memory(struct msm_eeprom_ctrl_t *e_ctrl,
-			      struct msm_eeprom_memory_block_t *block)
-{
-	int rc = 0;
-	int j;
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-	int delay;
-	char out[4];
-	uint32_t temp;
-#endif
-	struct msm_eeprom_memory_map_t *emap = block->map;
-	struct msm_eeprom_board_info *eb_info;
-	uint8_t *memptr = block->mapdata;
-
-	if (!e_ctrl) {
-		pr_err("%s e_ctrl is NULL", __func__);
-		return -EINVAL;
-	}
-
-	eb_info = e_ctrl->eboard_info;
-	for (j = 0; j < block->num_map; j++) {
-		if (emap[j].saddr.addr) {
-			eb_info->i2c_slaveaddr = emap[j].saddr.addr;
-			e_ctrl->i2c_client.cci_client->sid =
-					eb_info->i2c_slaveaddr >> 1;
-			CDBG("qcom,slave-addr = 0x%X\n",
-				eb_info->i2c_slaveaddr);
-		}
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-		if (emap[j].page.valid_size &&
-				eb_info->i2c_slaveaddr == EEPROM_ONSEMI_ADDR) {
-			temp = htonl(emap[j].page.data);
-			memcpy(out, (void *)&temp, sizeof(temp));
-			e_ctrl->i2c_client.addr_type = emap[j].page.addr_t;
-			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write_seq(
-				&(e_ctrl->i2c_client), emap[j].page.addr, out,
-				sizeof(temp));
-				delay = emap[j].page.delay * 1000;
-				usleep_range(delay, delay + 100);
-			if (rc < 0) {
-				pr_err("%s: page write failed\n", __func__);
-				return rc;
-			}
-		} else if (emap[j].page.valid_size) {
-#else
-		if (emap[j].page.valid_size) {
-#endif
-			e_ctrl->i2c_client.addr_type = emap[j].page.addr_t;
-			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write(
-				&(e_ctrl->i2c_client), emap[j].page.addr,
-				emap[j].page.data, emap[j].page.data_t);
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-				delay = emap[j].page.delay * 1000;
-				usleep_range(delay, delay + 100);
-#else
-				msleep(emap[j].page.delay);
-#endif
-			if (rc < 0) {
-				CDBG("%s: page write failed\n", __func__);
-				return rc;
-			}
-		}
-		if (emap[j].pageen.valid_size) {
-			e_ctrl->i2c_client.addr_type = emap[j].pageen.addr_t;
-			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write(
-				&(e_ctrl->i2c_client), emap[j].pageen.addr,
-				emap[j].pageen.data, emap[j].pageen.data_t);
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-				delay = emap[j].pageen.delay;
-				usleep_range(delay, delay + 100);
-#else
-				msleep(emap[j].pageen.delay);
-#endif
-			if (rc < 0) {
-				pr_err("%s: page enable failed\n", __func__);
-				return rc;
-			}
-		}
-		if (emap[j].poll.valid_size) {
-			e_ctrl->i2c_client.addr_type = emap[j].poll.addr_t;
-			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_poll(
-				&(e_ctrl->i2c_client), emap[j].poll.addr,
-				emap[j].poll.data, emap[j].poll.data_t);
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-				delay = emap[j].poll.delay;
-				usleep_range(delay, delay + 100);
-#else
-				msleep(emap[j].poll.delay);
-#endif
-			if (rc < 0) {
-				pr_err("%s: poll failed\n", __func__);
-				return rc;
-			}
-		}
-		if (emap[j].mem.valid_size) {
-			e_ctrl->i2c_client.addr_type = emap[j].mem.addr_t;
-			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(
-				&(e_ctrl->i2c_client), emap[j].mem.addr,
-				memptr, emap[j].mem.valid_size);
-			if (rc < 0) {
-				pr_err("%s: read failed\n", __func__);
-				return rc;
-			}
-			memptr += emap[j].mem.valid_size;
-		}
-		if (emap[j].pageen.valid_size) {
-			e_ctrl->i2c_client.addr_type = emap[j].pageen.addr_t;
-			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write(
-				&(e_ctrl->i2c_client), emap[j].pageen.addr,
-				0, emap[j].pageen.data_t);
-			if (rc < 0) {
-				pr_err("%s: page disable failed\n", __func__);
-				return rc;
-			}
-		}
-	}
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-	x7_set_sensor_name(e_ctrl, block->mapdata);
-	x11_set_sensor_name(e_ctrl, block->mapdata);
-#endif
-	return rc;
-}
-
 static int eeprom_config_read_cal_data(struct msm_eeprom_ctrl_t *e_ctrl,
 	struct msm_eeprom_cfg_data *cdata)
 {
 	int rc;
 
-	if (e_ctrl->read_eeprom == 0) {
-		rc = msm_camera_power_up(&e_ctrl->eboard_info->power_info,
-			e_ctrl->eeprom_device_type, &e_ctrl->i2c_client);
-		if (rc < 0) {
-			pr_err("failed rc %d\n", rc);
-			goto power_down;
-		}
-		rc = read_eeprom_memory(e_ctrl, &e_ctrl->cal_data);
-		if (rc < 0) {
-			pr_err("Sensor EEPROM Read Failed\n");
-			goto power_down;
-		}
-		e_ctrl->is_supported |= msm_eeprom_match_crc(&e_ctrl->cal_data);
-		CDBG("e_ctrl is supported %d\n", e_ctrl->is_supported);
-		rc = msm_camera_power_down(&e_ctrl->eboard_info->power_info,
-			e_ctrl->eeprom_device_type,	&e_ctrl->i2c_client);
-		if (rc < 0) {
-			pr_err("failed rc %d\n", rc);
-			goto power_down;
-		}
-		e_ctrl->read_eeprom = 1;
-	}
 	/* check range */
 	if (cdata->cfg.read_data.num_bytes >
 		e_ctrl->cal_data.num_data) {
@@ -580,10 +427,6 @@ static int eeprom_config_read_cal_data(struct msm_eeprom_ctrl_t *e_ctrl,
 		e_ctrl->cal_data.mapdata,
 		cdata->cfg.read_data.num_bytes);
 
-	return rc;
-power_down:
-	msm_camera_power_down(&e_ctrl->eboard_info->power_info,
-		e_ctrl->eeprom_device_type, &e_ctrl->i2c_client);
 	return rc;
 }
 
@@ -716,7 +559,139 @@ static const struct v4l2_subdev_internal_ops msm_eeprom_internal_ops = {
 	.open = msm_eeprom_open,
 	.close = msm_eeprom_close,
 };
+/**
+  * read_eeprom_memory() - read map data into buffer
+  * @e_ctrl:	eeprom control struct
+  * @block:	block to be read
+  *
+  * This function iterates through blocks stored in block->map, reads each
+  * region and concatenate them into the pre-allocated block->mapdata
+  */
+static int read_eeprom_memory(struct msm_eeprom_ctrl_t *e_ctrl,
+			      struct msm_eeprom_memory_block_t *block)
+{
+	int rc = 0;
+	int j;
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+	int delay;
+	char out[4];
+	uint32_t temp;
+#endif
+	struct msm_eeprom_memory_map_t *emap = block->map;
+	struct msm_eeprom_board_info *eb_info;
+	uint8_t *memptr = block->mapdata;
 
+	if (!e_ctrl) {
+		pr_err("%s e_ctrl is NULL", __func__);
+		return -EINVAL;
+	}
+
+	eb_info = e_ctrl->eboard_info;
+
+	for (j = 0; j < block->num_map; j++) {
+		if (emap[j].saddr.addr) {
+			eb_info->i2c_slaveaddr = emap[j].saddr.addr;
+			e_ctrl->i2c_client.cci_client->sid =
+					eb_info->i2c_slaveaddr >> 1;
+			pr_err("qcom,slave-addr = 0x%X\n",
+				eb_info->i2c_slaveaddr);
+		}
+
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+		if (emap[j].page.valid_size &&
+				eb_info->i2c_slaveaddr == EEPROM_ONSEMI_ADDR) {
+			temp = htonl(emap[j].page.data);
+			memcpy(out, (void *)&temp, sizeof(temp));
+			e_ctrl->i2c_client.addr_type = emap[j].page.addr_t;
+			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write_seq(
+				&(e_ctrl->i2c_client), emap[j].page.addr, out,
+				sizeof(temp));
+				delay = emap[j].page.delay * 1000;
+				usleep_range(delay, delay + 100);
+			if (rc < 0) {
+				pr_err("%s: page write failed\n", __func__);
+				return rc;
+			}
+		} else if (emap[j].page.valid_size) {
+#else
+		if (emap[j].page.valid_size) {
+#endif
+			e_ctrl->i2c_client.addr_type = emap[j].page.addr_t;
+			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write(
+				&(e_ctrl->i2c_client), emap[j].page.addr,
+				emap[j].page.data, emap[j].page.data_t);
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+				delay = emap[j].page.delay * 1000;
+				usleep_range(delay, delay + 100);
+#else
+				msleep(emap[j].page.delay);
+#endif
+			if (rc < 0) {
+				pr_err("%s: page write failed\n", __func__);
+				return rc;
+			}
+		}
+		if (emap[j].pageen.valid_size) {
+			e_ctrl->i2c_client.addr_type = emap[j].pageen.addr_t;
+			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write(
+				&(e_ctrl->i2c_client), emap[j].pageen.addr,
+				emap[j].pageen.data, emap[j].pageen.data_t);
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+				delay = emap[j].pageen.delay;
+				usleep_range(delay, delay + 100);
+#else
+				msleep(emap[j].pageen.delay);
+#endif
+			if (rc < 0) {
+				pr_err("%s: page enable failed\n", __func__);
+				return rc;
+			}
+		}
+		if (emap[j].poll.valid_size) {
+			e_ctrl->i2c_client.addr_type = emap[j].poll.addr_t;
+			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_poll(
+				&(e_ctrl->i2c_client), emap[j].poll.addr,
+				emap[j].poll.data, emap[j].poll.data_t);
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+				delay = emap[j].poll.delay;
+				usleep_range(delay, delay + 100);
+#else
+				msleep(emap[j].poll.delay);
+#endif
+			if (rc < 0) {
+				pr_err("%s: poll failed\n", __func__);
+				return rc;
+			}
+		}
+
+		if (emap[j].mem.valid_size) {
+			e_ctrl->i2c_client.addr_type = emap[j].mem.addr_t;
+			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(
+				&(e_ctrl->i2c_client), emap[j].mem.addr,
+				memptr, emap[j].mem.valid_size);
+			if (rc < 0) {
+				pr_err("%s: read failed\n", __func__);
+				return rc;
+			}
+			memptr += emap[j].mem.valid_size;
+		}
+		if (emap[j].pageen.valid_size) {
+			e_ctrl->i2c_client.addr_type = emap[j].pageen.addr_t;
+			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_write(
+				&(e_ctrl->i2c_client), emap[j].pageen.addr,
+				0, emap[j].pageen.data_t);
+			if (rc < 0) {
+				pr_err("%s: page disable failed\n", __func__);
+				return rc;
+			}
+		}
+	}
+#ifdef CONFIG_MACH_XIAOMI_MSM8992
+	x7_set_sensor_name(e_ctrl, block->mapdata);
+	x11_set_sensor_name(e_ctrl, block->mapdata);
+#endif
+	return rc;
+}
 /**
   * msm_eeprom_parse_memory_map() - parse memory map in device node
   * @of:	device node
@@ -1074,22 +1049,15 @@ static int msm_eeprom_spi_setup(struct spi_device *spi)
 	/* prepare memory buffer */
 	rc = msm_eeprom_parse_memory_map(spi->dev.of_node,
 					 &e_ctrl->cal_data);
-	if (rc < 0) {
+	if (rc < 0)
 		CDBG("%s: no cal memory map\n", __func__);
-#ifndef CONFIG_MACH_XIAOMI_MSM8992
-		goto free_datamap;
-#endif
-	}
 
+	/* power up eeprom for reading */
 	rc = msm_camera_power_up(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
 	if (rc < 0) {
 		pr_err("failed rc %d\n", rc);
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
-		goto free_datamap;
-#else
-		goto power_down;
-#endif
+		goto caldata_free;
 	}
 
 	/* check eeprom id */
@@ -1098,7 +1066,6 @@ static int msm_eeprom_spi_setup(struct spi_device *spi)
 		CDBG("%s: eeprom not matching %d\n", __func__, rc);
 		goto power_down;
 	}
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	/* read eeprom */
 	if (e_ctrl->cal_data.map) {
 		rc = read_eeprom_memory(e_ctrl, &e_ctrl->cal_data);
@@ -1109,16 +1076,14 @@ static int msm_eeprom_spi_setup(struct spi_device *spi)
 		e_ctrl->is_supported |= msm_eeprom_match_crc(
 						&e_ctrl->cal_data);
 	}
-#endif
+
 	rc = msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
 	if (rc < 0) {
 		pr_err("failed rc %d\n", rc);
-		goto free_datamap;
+		goto caldata_free;
 	}
-#ifndef CONFIG_MACH_XIAOMI_MSM8992
-	e_ctrl->read_eeprom = 0;
-#endif
+
 	/* initiazlie subdev */
 	v4l2_spi_subdev_init(&e_ctrl->msm_sd.sd,
 		e_ctrl->i2c_client.spi_client->spi_master,
@@ -1130,17 +1095,16 @@ static int msm_eeprom_spi_setup(struct spi_device *spi)
 	e_ctrl->msm_sd.sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
 	e_ctrl->msm_sd.sd.entity.group_id = MSM_CAMERA_SUBDEV_EEPROM;
 	msm_sd_register(&e_ctrl->msm_sd);
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	e_ctrl->is_supported = (e_ctrl->is_supported << 1) | 1;
-#else
-	e_ctrl->is_supported =  1;
-#endif
+	CDBG("%s success result=%d supported=%x X\n", __func__, rc,
+	     e_ctrl->is_supported);
+
 	return 0;
 
 power_down:
 	msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
-free_datamap:
+caldata_free:
 	kfree(e_ctrl->cal_data.mapdata);
 	kfree(e_ctrl->cal_data.map);
 board_free:
@@ -1211,30 +1175,10 @@ static int eeprom_config_read_cal_data32(struct msm_eeprom_ctrl_t *e_ctrl,
 	cdata.cfgtype = cdata32->cfgtype;
 	cdata.is_supported = cdata32->is_supported;
 	cdata.cfg.read_data.num_bytes = cdata32->cfg.read_data.num_bytes;
-	if (e_ctrl->read_eeprom == 0) {
-		rc = msm_camera_power_up(&e_ctrl->eboard_info->power_info,
-			e_ctrl->eeprom_device_type, &e_ctrl->i2c_client);
-		if (rc < 0) {
-			pr_err("failed rc %d\n", rc);
-			goto power_down;
-		}
-		rc = read_eeprom_memory(e_ctrl, &e_ctrl->cal_data);
-		if (rc < 0) {
-			pr_err("EEPROM Read Failed\n");
-			goto power_down;
-		}
-		e_ctrl->is_supported |= msm_eeprom_match_crc(&e_ctrl->cal_data);
-		CDBG("e_ctrl is supported %d\n", e_ctrl->is_supported);
-		rc = msm_camera_power_down(&e_ctrl->eboard_info->power_info,
-			e_ctrl->eeprom_device_type, &e_ctrl->i2c_client);
-		if (rc < 0)
-			pr_err("failed rc %d\n", rc);
-		e_ctrl->read_eeprom = 1;
-	}
 	/* check range */
 	if (cdata.cfg.read_data.num_bytes >
 	    e_ctrl->cal_data.num_data) {
-		pr_err("%s: Invalid size. exp %u, req %u\n", __func__,
+		CDBG("%s: Invalid size. exp %u, req %u\n", __func__,
 			e_ctrl->cal_data.num_data,
 			cdata.cfg.read_data.num_bytes);
 		return -EINVAL;
@@ -1247,10 +1191,6 @@ static int eeprom_config_read_cal_data32(struct msm_eeprom_ctrl_t *e_ctrl,
 	rc = copy_to_user(ptr_dest, e_ctrl->cal_data.mapdata,
 		cdata.cfg.read_data.num_bytes);
 
-	return rc;
-power_down:
-	msm_camera_power_down(&e_ctrl->eboard_info->power_info,
-		e_ctrl->eeprom_device_type, &e_ctrl->i2c_client);
 	return rc;
 }
 
@@ -1330,9 +1270,7 @@ static long msm_eeprom_subdev_fops_ioctl32(struct file *file, unsigned int cmd,
 static int msm_eeprom_platform_probe(struct platform_device *pdev)
 {
 	int rc = 0;
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	int j = 0;
-#endif
 	uint32_t temp;
 
 	struct msm_camera_cci_client *cci_client = NULL;
@@ -1443,14 +1381,13 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 
 	rc = msm_eeprom_parse_memory_map(of_node, &e_ctrl->cal_data);
 	if (rc < 0)
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 		goto board_free;
 
 	rc = msm_camera_power_up(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
 	if (rc) {
 		pr_err("failed rc %d\n", rc);
-		goto free_datamap;
+		goto memdata_free;
 	}
 	rc = read_eeprom_memory(e_ctrl, &e_ctrl->cal_data);
 	if (rc < 0) {
@@ -1467,12 +1404,8 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 		&e_ctrl->i2c_client);
 	if (rc) {
 		pr_err("failed rc %d\n", rc);
-		goto free_datamap;
+		goto memdata_free;
 	}
-#else
-		goto free_datamap;
-	e_ctrl->read_eeprom = 0;
-#endif
 	v4l2_subdev_init(&e_ctrl->msm_sd.sd,
 		e_ctrl->eeprom_v4l2_subdev_ops);
 	v4l2_set_subdevdata(&e_ctrl->msm_sd.sd, e_ctrl);
@@ -1493,20 +1426,14 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 	e_ctrl->msm_sd.sd.devnode->fops = &msm_eeprom_v4l2_subdev_fops;
 #endif
 
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	e_ctrl->is_supported = (e_ctrl->is_supported << 1) | 1;
-#else
-	e_ctrl->is_supported = 1;
-#endif
 	CDBG("%s X\n", __func__);
 	return rc;
 
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 power_down:
 	msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
-#endif
-free_datamap:
+memdata_free:
 	kfree(e_ctrl->cal_data.mapdata);
 	kfree(e_ctrl->cal_data.map);
 board_free:
@@ -1547,9 +1474,7 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
 	int rc = 0;
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	int j = 0;
-#endif
 	uint32_t temp;
 	struct msm_eeprom_ctrl_t *e_ctrl = NULL;
 	struct msm_camera_power_ctrl_t *power_info = NULL;
@@ -1631,14 +1556,13 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 
 	rc = msm_eeprom_parse_memory_map(of_node, &e_ctrl->cal_data);
 	if (rc < 0)
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 		goto i2c_board_free;
 
 	rc = msm_camera_power_up(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
 	if (rc) {
 		pr_err("failed rc %d\n", rc);
-		goto free_datamap;
+		goto i2c_memdata_free;
 	}
 	rc = read_eeprom_memory(e_ctrl, &e_ctrl->cal_data);
 	if (rc < 0) {
@@ -1655,13 +1579,9 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 		&e_ctrl->i2c_client);
 	if (rc) {
 		pr_err("failed rc %d\n", rc);
-		goto free_datamap;
+		goto i2c_memdata_free;
 	}
-#else
-		goto free_datamap;
-#endif
-
-		/*IMPLEMENT READING PART*/
+	/*IMPLEMENT READING PART*/
 	/* Initialize sub device */
 	v4l2_i2c_subdev_init(&e_ctrl->msm_sd.sd,
 		e_ctrl->i2c_client.client,
@@ -1675,19 +1595,13 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 	e_ctrl->msm_sd.sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
 	e_ctrl->msm_sd.sd.entity.group_id = MSM_CAMERA_SUBDEV_EEPROM;
 	msm_sd_register(&e_ctrl->msm_sd);
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 	e_ctrl->is_supported = (e_ctrl->is_supported << 1) | 1;
-#else
-	e_ctrl->is_supported = 1;
-#endif
 	return rc;
 
-#ifdef CONFIG_MACH_XIAOMI_MSM8992
 i2c_power_down:
 	msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
-#endif
-free_datamap:
+i2c_memdata_free:
 	kfree(e_ctrl->cal_data.mapdata);
 	kfree(e_ctrl->cal_data.map);
 i2c_board_free:
