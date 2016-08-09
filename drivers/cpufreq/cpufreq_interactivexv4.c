@@ -1702,7 +1702,7 @@ static int cpufreq_governor_interactivexv4(struct cpufreq_policy *policy,
 static
 #endif
 struct cpufreq_governor cpufreq_gov_interactivexv4 = {
-	.name = "interactiveX V4",
+	.name = "interactiveX_V4",
 	.governor = cpufreq_governor_interactivexv4,
 	.max_transition_latency = 10000000,
 	.owner = THIS_MODULE,
