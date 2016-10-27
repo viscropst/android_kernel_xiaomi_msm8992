@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -76,7 +76,7 @@ void
 limInitPeerIdxpool(tpAniSirGlobal pMac,tpPESession pSessionEntry)
 {
     tANI_U8 i;
-    tANI_U8 maxAssocSta = pMac->lim.maxStation;
+    tANI_U8 maxAssocSta = pMac->lim.gLimAssocStaLimit;
 
     pSessionEntry->gpLimPeerIdxpool[0]=0;
 
@@ -84,14 +84,17 @@ limInitPeerIdxpool(tpAniSirGlobal pMac,tpPESession pSessionEntry)
     //In station role, DPH_STA_HASH_INDEX_PEER (index 1) is reserved for peer
     //station index corresponding to AP. Avoid choosing that index and get index
     //starting from (DPH_STA_HASH_INDEX_PEER + 1) (index 2) for TDLS stations;
-    if (LIM_IS_STA_ROLE(pSessionEntry)) {
+    if (pSessionEntry->limSystemRole == eLIM_STA_ROLE )
+    {
         pSessionEntry->freePeerIdxHead = DPH_STA_HASH_INDEX_PEER + 1;
     }
     else
 #endif
 #ifdef QCA_IBSS_SUPPORT
-    if (LIM_IS_IBSS_ROLE(pSessionEntry)) {
+    if (pSessionEntry->limSystemRole == eLIM_STA_IN_IBSS_ROLE)
+    {
         pSessionEntry->freePeerIdxHead=LIM_START_PEER_IDX;
+        maxAssocSta = pMac->lim.gLimIbssStaLimit;
     }
     else
 #endif
@@ -134,21 +137,10 @@ tANI_U16
 limAssignPeerIdx(tpAniSirGlobal pMac, tpPESession pSessionEntry)
 {
     tANI_U16 peerId;
-    uint8 max_peer = 0;
-
-
-    limLog(pMac, LOG1, FL("pePersona:%d"),
-                          pSessionEntry->pePersona);
-
-    if (pSessionEntry->pePersona == VOS_STA_SAP_MODE)
-        max_peer = pMac->lim.glim_assoc_sta_limit_ap;
-    else if (pSessionEntry->pePersona == VOS_P2P_GO_MODE)
-        max_peer = pMac->lim.glim_assoc_sta_limit_go;
 
     // make sure we haven't exceeded the configurable limit on associations
     // This count is global to ensure that it doesnt exceed the hardware limits.
-    if (peGetCurrentSTAsCount(pMac) >= pMac->lim.gLimAssocStaLimit ||
-        (max_peer != 0 && pSessionEntry->gLimNumOfCurrentSTAs >= max_peer))
+    if (peGetCurrentSTAsCount(pMac) >= pMac->lim.gLimAssocStaLimit)
     {
         // too many associations already active
         return 0;

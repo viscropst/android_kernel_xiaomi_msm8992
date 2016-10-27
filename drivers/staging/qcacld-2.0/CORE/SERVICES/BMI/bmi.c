@@ -1,5 +1,5 @@
 /*
- * copyright (c) 2012, 2014, 2016 The Linux Foundation. All rights reserved.
+ * copyright (c) 2012,2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -47,7 +47,7 @@
 
 #endif
 
-#ifdef WLAN_DEBUG
+#ifdef DEBUG
 static ATH_DEBUG_MASK_DESCRIPTION bmi_debug_desc[] = {
     { ATH_DEBUG_BMI , "BMI Tracing"},
 };
@@ -231,11 +231,6 @@ A_STATUS bmi_done(struct ol_softc *scn)
 	    return -1;
 
     return 0;
-}
-
-void bmi_target_ready(struct ol_softc *scn, void *cfg_ctx)
-{
-    ol_target_ready(scn, cfg_ctx);
 }
 
 #ifndef HIF_MESSAGE_BASED
