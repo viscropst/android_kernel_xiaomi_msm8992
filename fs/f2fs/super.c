@@ -566,6 +566,8 @@ static void f2fs_put_super(struct super_block *sb)
 
 	sb->s_fs_info = NULL;
 	brelse(sbi->raw_super_buf);
+	if (sbi->s_chksum_driver)
+		crypto_free_shash(sbi->s_chksum_driver);
 	kfree(sbi);
 }
 
@@ -897,7 +899,7 @@ static const struct export_operations f2fs_export_ops = {
 	.get_parent = f2fs_get_parent,
 };
 
-static loff_t max_file_size(unsigned bits)
+loff_t max_file_size(unsigned bits)
 {
 	loff_t result = (DEF_ADDRS_PER_INODE - F2FS_INLINE_XATTR_ADDRS);
 	loff_t leaf_count = ADDRS_PER_BLOCK;
@@ -1142,6 +1144,15 @@ try_onemore:
 	sbi = kzalloc(sizeof(struct f2fs_sb_info), GFP_KERNEL);
 	if (!sbi)
 		return -ENOMEM;
+
+	/* Load the checksum driver */
+	sbi->s_chksum_driver = crypto_alloc_shash("crc32", 0, 0);
+	if (IS_ERR(sbi->s_chksum_driver)) {
+		f2fs_msg(sb, KERN_ERR, "Cannot load crc32 driver.");
+		err = PTR_ERR(sbi->s_chksum_driver);
+		sbi->s_chksum_driver = NULL;
+		goto free_sbi;
+	}
 
 	/* set a block size */
 	if (unlikely(!sb_set_blocksize(sb, F2FS_BLKSIZE))) {
@@ -1388,6 +1399,8 @@ free_options:
 free_sb_buf:
 	brelse(raw_super_buf);
 free_sbi:
+	if (sbi->s_chksum_driver)
+		crypto_free_shash(sbi->s_chksum_driver);
 	kfree(sbi);
 
 	/* give only one another chance */
