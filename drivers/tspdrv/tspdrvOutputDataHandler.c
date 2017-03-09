@@ -5,7 +5,7 @@
  **
  ** Description:
  **     Output data handler module for TSP 3000 Edition.
- **     ‘This module supports only one actuator and one sample per update.
+ **     â€˜This module supports only one actuator and one sample per update.
  **
  ** Portions Copyright (c) 2011-2014 Immersion Corporation. All Rights Reserved.
  ** Copyright (C) 2016 XiaoMi, Inc.
