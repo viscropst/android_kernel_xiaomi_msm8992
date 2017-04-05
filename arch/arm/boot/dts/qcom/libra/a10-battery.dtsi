@@ -13,8 +13,8 @@
 /{
 	mtp_batterydata: qcom,battery-data {
 		qcom,batt-id-range-pct = <15>;
-		#include "batterydata-x11-atl-3080mah.dtsi"
-		#include "batterydata-x11-lg-3080mah.dtsi"
+		#include "batterydata-a10-atl-3260mah.dtsi"
+		#include "batterydata-a10-sdi-3260mah.dtsi"
 		#include "batterydata-itech-3020mah.dtsi"
 	};
 };
@@ -49,6 +49,6 @@
 	qcom,cold-bat-decidegc = <0>;
 	qcom,resume-soc = <99>;
 	qcom,fg-cutoff-voltage-mv = <3400>;
-	qcom,thermal-coefficients = [dd 85 63 4a e6 35];
+	qcom,thermal-coefficients = [b7 85 b2 49 71 35];
 	qcom,fg-vbat-estimate-diff-mv = <100>;
 };
