@@ -1352,6 +1352,14 @@ static int __read_mostly sched_upmigrate_min_nice = 15;
 int __read_mostly sysctl_sched_upmigrate_min_nice = 15;
 
 /*
+ * The load scale factor of a CPU gets boosted when its max frequency
+ * is restricted due to which the tasks are migrating to higher capacity
+ * CPUs early. The sched_upmigrate threshold is auto-upgraded by
+ * rq->max_possible_freq/rq->max_freq of a lower capacity CPU.
+ */
+unsigned int up_down_migrate_scale_factor = 1024;
+
+/*
  * Scheduler boost is a mechanism to temporarily place tasks on CPUs
  * with higher capacity than those where a task would have normally
  * ended up with their load characteristics. Any entity enabling
@@ -1366,6 +1374,35 @@ static inline int available_cpu_capacity(int cpu)
 	return rq->capacity;
 }
 
+void update_up_down_migrate(void)
+{
+	unsigned int up_migrate = pct_to_real(sysctl_sched_upmigrate_pct);
+	unsigned int down_migrate = pct_to_real(sysctl_sched_downmigrate_pct);
+	unsigned int delta;
+
+	if (up_down_migrate_scale_factor == 1024)
+		goto done;
+
+	delta = up_migrate - down_migrate;
+
+	up_migrate /= NSEC_PER_USEC;
+	up_migrate *= up_down_migrate_scale_factor;
+	up_migrate >>= 10;
+	up_migrate *= NSEC_PER_USEC;
+
+	up_migrate = min(up_migrate, sched_ravg_window);
+
+	down_migrate /= NSEC_PER_USEC;
+	down_migrate *= up_down_migrate_scale_factor;
+	down_migrate >>= 10;
+	down_migrate *= NSEC_PER_USEC;
+
+	down_migrate = min(down_migrate, up_migrate - delta);
+done:
+	sched_upmigrate = up_migrate;
+	sched_downmigrate = down_migrate;
+}
+
 void set_hmp_defaults(void)
 {
 	sched_spill_load =
@@ -1374,11 +1411,7 @@ void set_hmp_defaults(void)
 	sched_small_task =
 		pct_to_real(sysctl_sched_small_task_pct);
 
-	sched_upmigrate =
-		pct_to_real(sysctl_sched_upmigrate_pct);
-
-	sched_downmigrate =
-		pct_to_real(sysctl_sched_downmigrate_pct);
+	update_up_down_migrate();
 
 #ifdef CONFIG_SCHED_FREQ_INPUT
 	sched_heavy_task =
@@ -1747,6 +1780,7 @@ unsigned int power_cost_at_freq(int cpu, unsigned int freq)
 	int i = 0;
 	struct cpu_pwr_stats *per_cpu_info = get_cpu_pwr_stats();
 	struct cpu_pstate_pwr *costs;
+	struct freq_max_load *max_load;
 
 	if (!per_cpu_info || !per_cpu_info[cpu].ptable ||
 	    !sysctl_sched_enable_power_aware)
@@ -1762,12 +1796,18 @@ unsigned int power_cost_at_freq(int cpu, unsigned int freq)
 
 	costs = per_cpu_info[cpu].ptable;
 
+	rcu_read_lock();
+	max_load = rcu_dereference(per_cpu(freq_max_load, cpu));
 	while (costs[i].freq != 0) {
-		if (costs[i].freq >= freq ||
-		    costs[i+1].freq == 0)
+		if (costs[i+1].freq == 0 ||
+		    (costs[i].freq >= freq &&
+		     (!max_load || max_load->freqs[i] >= freq))) {
+			rcu_read_unlock();
 			return costs[i].power;
+		}
 		i++;
 	}
+	rcu_read_unlock();
 	BUG();
 }
 
@@ -2963,7 +3003,7 @@ void init_new_task_load(struct task_struct *p)
 	u32 init_load_pelt = sched_init_task_load_pelt;
 	u32 init_load_pct = current->init_load_pct;
 
-	/* Note: child's init_load_pct itself would be 0 */
+	p->init_load_pct = 0;
 	memset(&p->ravg, 0, sizeof(struct ravg));
 	p->se.avg.decay_count	= 0;
 
@@ -3265,13 +3305,13 @@ static inline void update_entity_load_avg(struct sched_entity *se,
 	 */
 	if (entity_is_task(se)) {
 		now = cfs_rq_clock_task(cfs_rq);
-		if (se->on_rq)
+		if (sched_use_pelt && se->on_rq)
 			dec_hmp_sched_stats_fair(rq_of(cfs_rq), task_of(se));
 	} else
 		now = cfs_rq_clock_task(group_cfs_rq(se));
 
 	decayed = __update_entity_runnable_avg(cpu, now, &se->avg, se->on_rq);
-	if (entity_is_task(se) && se->on_rq)
+	if (sched_use_pelt && entity_is_task(se) && se->on_rq)
 		inc_hmp_sched_stats_fair(rq_of(cfs_rq), task_of(se));
 
 	if (!decayed)
@@ -6033,12 +6073,13 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 
 	/*
 	 * Aggressive migration if:
-	 * 1) task is cache cold, or
-	 * 2) too many balance attempts have failed.
+	 * 1) IDLE or NEWLY_IDLE balance.
+	 * 2) task is cache cold, or
+	 * 3) too many balance attempts have failed.
 	 */
 
 	tsk_cache_hot = task_hot(p, env->src_rq->clock_task, env->sd);
-	if (!tsk_cache_hot ||
+	if (env->idle != CPU_NOT_IDLE || !tsk_cache_hot ||
 		env->sd->nr_balance_failed > env->sd->cache_nice_tries) {
 
 		if (tsk_cache_hot) {
@@ -7291,6 +7332,8 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 /* Working cpumask for load_balance and load_balance_newidle. */
 DEFINE_PER_CPU(cpumask_var_t, load_balance_mask);
 
+#define NEED_ACTIVE_BALANCE_THRESHOLD 10
+
 static int need_active_balance(struct lb_env *env)
 {
 	struct sched_domain *sd = env->sd;
@@ -7309,7 +7352,8 @@ static int need_active_balance(struct lb_env *env)
 			return 1;
 	}
 
-	return unlikely(sd->nr_balance_failed > sd->cache_nice_tries+2);
+	return unlikely(sd->nr_balance_failed >
+			sd->cache_nice_tries + NEED_ACTIVE_BALANCE_THRESHOLD);
 }
 
 /*
@@ -7521,7 +7565,9 @@ no_move:
 			 * We've kicked active balancing, reset the failure
 			 * counter.
 			 */
-			sd->nr_balance_failed = sd->cache_nice_tries+1;
+			sd->nr_balance_failed =
+			    sd->cache_nice_tries +
+			    NEED_ACTIVE_BALANCE_THRESHOLD - 1;
 		}
 	} else {
 		sd->nr_balance_failed = 0;
